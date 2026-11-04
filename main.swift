@@ -70,7 +70,16 @@ enum SystemInfo {
         return Memory(used: app + wired + comp, total: total, app: app, wired: wired, compressed: comp)
     }
 
+    private static var storageCache: (value: (used: Double, total: Double)?, at: CFTimeInterval) = (nil, -1000)
+
+    /// 磁盘用量缓存 30 秒（每次查询 ~20ms，而且不会秒级变化）
     static func storage() -> (used: Double, total: Double)? {
+        let now = CACurrentMediaTime()
+        if now - storageCache.at < 30, let v = storageCache.value { return v }
+        let v = storageUncached(); storageCache = (v, now); return v
+    }
+
+    private static func storageUncached() -> (used: Double, total: Double)? {
         let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
         guard let v = try? URL(fileURLWithPath: "/").resourceValues(forKeys: keys),
               let total = v.volumeTotalCapacity, let free = v.volumeAvailableCapacityForImportantUsage else { return nil }
@@ -244,19 +253,114 @@ struct Runner {
 
     var displayName: String { let p = name.split(separator: "|").map(String.init); return L(p[0], p.count > 1 ? p[1] : p[0]) }
 
-    func frames() -> [NSImage] {
+    /// 每帧只画一次，存成 2x 位图（之前每次显示都会重画，菜单栏动画一直占 CPU）
+    /// appearance：彩色 runner 里用到的动态颜色（如 labelColor）按它解析
+    func frames(appearance: NSAppearance? = nil) -> [NSImage] {
         (0..<frameCount).map { i in
-            let img = NSImage(size: size, flipped: false) { _ in
+            let scale: CGFloat = 2
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                       bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                       colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            rep.size = size
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            let render = {
                 NSColor.black.setFill(); NSColor.black.setStroke()
-                draw(Double(i) / Double(frameCount) * 2 * .pi)
-                return true
+                self.draw(Double(i) / Double(self.frameCount) * 2 * .pi)
             }
+            if let appearance { appearance.performAsCurrentDrawingAppearance(render) } else { render() }
+            NSGraphicsContext.restoreGraphicsState()
+            let img = NSImage(size: size)
+            img.addRepresentation(rep)
             img.isTemplate = template
             return img
         }
     }
 
-    static let all: [Runner] = [cat, coffee, rainbow, pixelCat]
+    static let all: [Runner] = [cat, coffee, rainbow, pixelCat, rocketCat]
+
+    // 橘猫火箭（原创彩色像素画）：橘猫骑着小火箭，尾焰闪烁，星星一闪一闪
+    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 6, size: NSSize(width: 36, height: 20), template: false) { t in
+        let W = 36, H = 20
+        let f = Int((t / (2 * .pi) * 6).rounded()) % 6
+        func c(_ r: Double, _ g: Double, _ b: Double) -> NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: 1) }
+        let orange = c(0.97, 0.60, 0.20), stripe = c(0.82, 0.40, 0.10), white = c(0.99, 0.97, 0.93)
+        let pink = c(0.99, 0.56, 0.66), eye = c(0.10, 0.09, 0.12), outline = c(0.16, 0.13, 0.18)
+        let hull = c(0.90, 0.92, 0.96), hullShade = c(0.66, 0.70, 0.79), red = c(0.92, 0.22, 0.24)
+        let glass = c(0.40, 0.74, 0.99), glassDark = c(0.16, 0.38, 0.74), nozzle = c(0.38, 0.38, 0.44)
+        let flameY = c(1.0, 0.90, 0.30), flameO = c(1.0, 0.56, 0.16), flameR = c(0.96, 0.27, 0.22)
+
+        var grid = [[NSColor?]](repeating: [NSColor?](repeating: nil, count: W), count: H)
+        let bob = f % 2 + 1                              // 整体上下颠簸 1 格（+1 给顶部描边留空间）
+        func set(_ x: Int, _ y: Int, _ col: NSColor) {
+            let yy = y + bob
+            if x >= 0 && x < W && yy >= 0 && yy < H { grid[yy][x] = col }
+        }
+        func rect(_ x0: Int, _ y0: Int, _ x1: Int, _ y1: Int, _ col: NSColor) {
+            for y in y0...y1 { for x in x0...x1 { set(x, y, col) } }
+        }
+
+        // —— 火箭（朝右）
+        rect(12, 10, 29, 14, hull)
+        rect(12, 14, 29, 14, hullShade)                  // 底部阴影
+        for (y, len) in [(10, 2), (11, 3), (12, 4), (13, 3), (14, 2)] { rect(30, y, 29 + len, y, red) }   // 尖头
+        rect(12, 7, 14, 9, red); set(15, 9, red)         // 上尾翼
+        rect(12, 15, 14, 16, red); set(15, 15, red)      // 下尾翼
+        rect(10, 11, 11, 13, nozzle)                     // 喷口
+        rect(24, 11, 26, 13, glassDark); set(25, 12, glass); set(24, 11, glass)   // 舷窗
+
+        // —— 橘猫（坐在火箭上，面朝右）
+        rect(16, 4, 22, 9, orange)                       // 身体
+        for x in [17, 19] { rect(x, 4, x, 6, stripe) }   // 条纹
+        rect(20, 6, 22, 9, white)                        // 肚皮
+        rect(21, 1, 27, 6, orange)                       // 头
+        set(21, 0, orange); set(22, 0, orange); set(26, 0, orange); set(27, 0, orange)   // 耳朵
+        set(22, 1, pink); set(26, 1, pink)               // 耳朵内侧
+        set(24, 1, stripe); set(24, 2, stripe)           // 额头条纹
+        set(23, 3, eye); set(26, 3, eye)                 // 眼睛
+        rect(23, 4, 26, 5, white)                        // 嘴巴
+        set(24, 4, pink)                                 // 鼻子
+        set(22, 4, pink); set(27, 4, pink)               // 腮红
+        rect(22, 9, 24, 9, white)                        // 前爪抱住火箭
+        // 尾巴：向后飘，随帧上下甩
+        let tailY = [5, 4, 4, 5, 6, 6][f]
+        set(15, 7, orange); set(14, tailY + 1, orange); set(13, tailY, orange); set(12, tailY, stripe)
+
+        // —— 自动描边：实心像素四周的空格画深色轮廓
+        let solid = grid.map { $0.map { $0 != nil } }
+        for y in 0..<H { for x in 0..<W where !solid[y][x] {
+            let n = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+            if n.contains(where: { $0.0 >= 0 && $0.0 < W && $0.1 >= 0 && $0.1 < H && solid[$0.1][$0.0] }) { grid[y][x] = outline }
+        } }
+
+        // —— 尾焰（不描边）：黄 → 橙 → 红，长度闪动
+        let len = [6, 8, 7, 9, 6, 8][f]
+        for (dy, short) in [(11, 2), (12, 0), (13, 2)] {
+            let l = len - short
+            for i in 0..<max(l, 0) {
+                let x = 9 - i
+                let col = i < l / 3 ? flameY : (i < l * 2 / 3 ? flameO : flameR)
+                if x >= 0 && grid[dy + bob][x] == nil { grid[dy + bob][x] = col }
+            }
+        }
+
+        // —— 画像素
+        let ctx = NSGraphicsContext.current!.cgContext
+        ctx.setShouldAntialias(false)
+        for y in 0..<H { for x in 0..<W { if let col = grid[y][x] { col.setFill(); NSRect(x: x, y: H - 1 - y, width: 1, height: 1).fill() } } }
+
+        // —— 星星：一闪一闪，亮时是十字
+        for (sx, sy, ph) in [(3, 3, 0), (32, 2, 2), (6, 18, 4), (34, 17, 1)] {
+            let phase = (f + ph) % 6
+            guard phase < 4 else { continue }
+            let col = NSColor(srgbRed: 1, green: 0.78, blue: 0.18, alpha: phase == 1 ? 1 : 0.75)   // 暖黄，浅色背景也看得见
+            col.setFill()
+            NSRect(x: sx, y: H - 1 - sy, width: 1, height: 1).fill()
+            if phase == 1 {
+                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] { NSRect(x: sx + dx, y: H - 1 - sy - dy, width: 1, height: 1).fill() }
+            }
+        }
+    }
 
     // 像素猫（原创像素格）：单色胖像素猫 + 深浅交替的像素条纹尾迹，模板图随菜单栏变色
     static let pixelCat = Runner(id: "pixel", name: "像素猫|Pixel Cat", frameCount: 6, size: NSSize(width: 34, height: 16)) { t in
@@ -523,12 +627,24 @@ final class TempMonitor {
     }()
 
     /// 所有传感器（同名取平均），按名称排序
-    func readAll() -> [(String, Double)] {
+    /// 传感器列表（含名字）缓存 30 秒：每次重新枚举 + 取名字要 ~80ms，是采样里最贵的一步
+    private var cached: [(AnyObject, String)] = []
+    private var cachedAt: CFTimeInterval = -1000
+    private func sensorList() -> [(AnyObject, String)] {
+        let now = CACurrentMediaTime()
+        if now - cachedAt < 30, !cached.isEmpty { return cached }
         guard let client, let services = IOHIDEventSystemClientCopyServices(client)?.takeRetainedValue() as? [AnyObject] else { return [] }
+        cached = services.compactMap { s in
+            (IOHIDServiceClientCopyProperty(s, "Product" as CFString)?.takeRetainedValue() as? String).map { (s, $0) }
+        }
+        cachedAt = now
+        return cached
+    }
+
+    func readAll() -> [(String, Double)] {
         var g: [String: [Double]] = [:]
-        for s in services {
-            guard let name = IOHIDServiceClientCopyProperty(s, "Product" as CFString)?.takeRetainedValue() as? String,
-                  let e = IOHIDServiceClientCopyEvent(s, 15, 0, 0)?.takeRetainedValue() else { continue }
+        for (s, name) in sensorList() {
+            guard let e = IOHIDServiceClientCopyEvent(s, 15, 0, 0)?.takeRetainedValue() else { continue }
             let v = IOHIDEventGetFloatValue(e, 15 << 16)
             if v > 0 && v < 150 { g[name, default: []].append(v) }
         }
@@ -537,11 +653,9 @@ final class TempMonitor {
     }
 
     func read() -> Temps {
-        guard let client, let services = IOHIDEventSystemClientCopyServices(client)?.takeRetainedValue() as? [AnyObject] else { return Temps() }
         var soc: [Double] = [], bat: [Double] = [], ssd: [Double] = []
-        for s in services {
-            guard let name = IOHIDServiceClientCopyProperty(s, "Product" as CFString)?.takeRetainedValue() as? String,
-                  let e = IOHIDServiceClientCopyEvent(s, 15, 0, 0)?.takeRetainedValue() else { continue }
+        for (s, name) in sensorList() where name.hasPrefix("PMU tdie") || name.hasPrefix("gas gauge battery") || name.hasPrefix("NAND") {
+            guard let e = IOHIDServiceClientCopyEvent(s, 15, 0, 0)?.takeRetainedValue() else { continue }
             let v = IOHIDEventGetFloatValue(e, 15 << 16)
             guard v > 0 && v < 150 else { continue }
             if name.hasPrefix("PMU tdie") { soc.append(v) }
@@ -729,7 +843,20 @@ enum DetailKind { case system, cpu, gpu, memory, temps, storage, battery, networ
 
 /// 进程 → 所属应用（取最外层 .app；否则用可执行文件名）
 enum AppIdentity {
+    private static var cache: [pid_t: (key: String, name: String, path: String?)] = [:]
+
+    /// 缓存版：同一个进程只查一次路径；不在当前进程列表里的缓存会被清掉
     static func of(_ pid: pid_t) -> (key: String, name: String, path: String?) {
+        if let c = cache[pid] { return c }
+        let v = lookup(pid); cache[pid] = v; return v
+    }
+
+    static func prune(_ alive: [pid_t]) {
+        let set = Set(alive)
+        cache = cache.filter { set.contains($0.key) }
+    }
+
+    private static func lookup(_ pid: pid_t) -> (key: String, name: String, path: String?) {
         var buf = [CChar](repeating: 0, count: 4096)
         let len = proc_pidpath(pid, &buf, UInt32(buf.count))
         let path = len > 0 ? String(cString: buf) : ""
@@ -760,7 +887,9 @@ enum AppIdentity {
         guard n > 0 else { return [] }
         var pids = [pid_t](repeating: 0, count: Int(n) * 2)
         let got = proc_listallpids(&pids, Int32(MemoryLayout<pid_t>.size * pids.count))
-        return pids.prefix(Int(max(got, 0))).filter { $0 > 0 }
+        let alive = pids.prefix(Int(max(got, 0))).filter { $0 > 0 }
+        prune(alive)
+        return alive
     }
 }
 
@@ -777,7 +906,6 @@ final class DetailProvider {
     private var prevCores: [Int32]?
     private var prevCPU: [pid_t: UInt64] = [:], prevGPU: [pid_t: UInt64] = [:]
     private var prevIf: [String: (UInt64, UInt64)] = [:]
-    private var prevTime = CACurrentMediaTime()
     private let timebase: Double = { var tb = mach_timebase_info(); mach_timebase_info(&tb); return Double(tb.numer) / Double(tb.denom) }()
     private lazy var ifNames: [String: String] = {
         var map: [String: String] = [:]
@@ -787,19 +915,31 @@ final class DetailProvider {
         return map
     }()
 
-    func reset() { stopNetwork(); prevCores = nil; prevCPU = [:]; prevGPU = [:]; prevIf = [:]; sampled = false
+    func reset() { stopNetwork(); sampled = false }
+    func resetAll() { stopNetwork(); prevCores = nil; prevCPU = [:]; prevGPU = [:]; prevIf = [:]; sampled = false
                    cores = []; cpuApps = []; gpuApps = []; netApps = [] }
 
+    private var tCPU: CFTimeInterval = 0, tGPU: CFTimeInterval = 0, tIf: CFTimeInterval = 0
+    private func dt(_ t: inout CFTimeInterval) -> Double {
+        let now = CACurrentMediaTime(); defer { t = now }
+        return max(now - t, 0.001)
+    }
+
+    /// 面板打开时先记一份基准：之后点进 CPU / GPU / 网络，马上就能算出速度，不用再等一轮
+    func prime() {
+        refreshCores(); refreshCPUApps(dt(&tCPU)); refreshGPU(dt(&tGPU)); refreshInterfaces(dt(&tIf))
+    }
+
+    func prewarmStorage() { refreshAppSizes() }
+
     func refresh(_ kind: DetailKind) {
-        let now = CACurrentMediaTime(), dt = max(now - prevTime, 0.001)
-        defer { prevTime = now }
         switch kind {
-        case .cpu:     refreshCores(); refreshCPUApps(dt)
-        case .gpu:     refreshGPU(dt)
+        case .cpu:     refreshCores(); refreshCPUApps(dt(&tCPU))
+        case .gpu:     refreshGPU(dt(&tGPU))
         case .memory:  memApps = ProcessMemory.top(PanelController.procRows)
         case .temps:   sensors = TempMonitor.shared.readAll()
         case .storage: refreshVolumes(); refreshAppSizes()
-        case .network: refreshInterfaces(dt); refreshNetApps()
+        case .network: refreshInterfaces(dt(&tIf)); refreshNetApps()
         default: break
         }
         sampled = true
@@ -967,6 +1107,7 @@ final class DetailProvider {
             if !apps.isEmpty {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/du")
+                p.qualityOfService = .background
                 p.arguments = ["-sk"] + apps
                 let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
                 if (try? p.run()) != nil {
@@ -1208,6 +1349,7 @@ enum Draw {
 
 // MARK: - 卡片：一块液态玻璃 + 自绘内容
 final class CardView: NSView {
+    var continuous = false                 // 带滚动曲线的卡片：每帧都要重画
     var drawer: (CGFloat) -> Void = { _ in }
     var onClick: (() -> Void)?
     private var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }
@@ -1265,7 +1407,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private var mainPage: Page!
 
     /// 通用页面：rows = [(高度, [(x, 宽, 绘制, 点击)])]；底层玻璃、上层内容
-    private func makePage(_ rows: [(CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)])], button: ((CardView, CGFloat) -> Void)? = nil) -> Page {
+    private func makePage(_ rows: [(CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)])], continuous: Set<Int> = [],
+                          button: ((CardView, CGFloat) -> Void)? = nil) -> Page {
         let W = Self.width, g = Self.gap, M = Self.margin
         var layout: [(CGFloat, CGFloat, CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)] = []
         var y: CGFloat = 0
@@ -1290,6 +1433,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             let card = CardView(frame: frame)
             card.drawer = d
             card.onClick = click
+            card.continuous = continuous.contains(i)
             contentLayer.addSubview(card)
             cards.append(card)
             if i == 0 { button?(card, w) }       // 第一张卡片（标题栏）里的按钮
@@ -1309,7 +1453,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
             (84,  [(0, W, drawMemory, { [weak self] in self?.showDetail(.memory) })]),
             (138, [(0, half, drawStorage, { [weak self] in self?.showDetail(.storage) }), (half + g, half, drawBattery, { [weak self] in self?.showDetail(.battery) })]),
             (96,  [(0, W, drawNetwork, { [weak self] in self?.showDetail(.network) })]),
-        ], button: { [weak self] card, w in
+        ], continuous: [1, 2, 7],    // CPU、GPU、网络三张带曲线的卡片（卡片按出现顺序编号）
+           button: { [weak self] card, w in
             guard let self else { return }
             let b = NSButton(image: NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")!,
                              target: self, action: #selector(self.settingsClicked(_:)))
@@ -1385,6 +1530,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     private func refreshDetail() {
         detail.refresh(detailKind)
+        settle()
         switch detailKind {
         case .system:  kvRows = SystemDetail.rows(spec)
         case .battery: kvRows = BatteryDetail.rows()
@@ -1539,6 +1685,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
     /// 切换页面：新页从一侧滑入并淡入，旧页向另一侧滑出并淡出；popover 高度同步平滑变化
     private func switchTo(_ page: Page, forward: Bool = true, animated: Bool = true) {
         cards = page.cards
+        settle()
         guard let old = current, old !== page.view else { return }
         let dx: CGFloat = 36
         // popover 不会自动改 host 的尺寸：手动设为新页面大小，新旧页面都按顶部对齐
@@ -1592,12 +1739,15 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     /// 主页打开时随采样更新“最忙应用”和内存压力
     func sampleMain() {
+        settle()
         memoryPressure = SystemInfo.memoryPressure()
         if isVisible && onMainPage { detail.refresh(.cpu) }
     }
 
     func show(below button: NSStatusBarButton) {
         model.resetShown()                      // 数字从 0 滚动、条形从空长满
+        detail.prime()
+        settle(); settleUntil += 0.6                    // 打开时从 0 长出来，多给一点时间
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         startTimer()
         onVisibilityChange(true)
@@ -1614,12 +1764,15 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private func startTimer() {
         timer?.invalidate()
         lastTick = CACurrentMediaTime()
-        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.frame() }
+        let t = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.frame() }   // 30fps 足够平滑
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
 
     private var frameCount = 0
+    private var settleUntil: CFTimeInterval = 0
+    /// 数据更新 / 页面切换后调用：接下来 0.8 秒内重画所有卡片，让数字和条形平滑过渡
+    func settle() { settleUntil = CACurrentMediaTime() + 0.8 }
     private func frame() {
         frameCount += 1
         if CommandLine.arguments.contains("--open-panel"), frameCount % 60 == 0 {
@@ -1629,7 +1782,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
         }
         let now = CACurrentMediaTime()
         model.tick(dt: now - lastTick); lastTick = now
-        cards.forEach { $0.needsDisplay = true }
+        // 只重画需要动的：曲线卡片每帧；其他卡片只在数值缓动期间（打开 / 每次采样后 0.8 秒）
+        let settling = now < settleUntil
+        for c in cards where c.continuous || settling { c.needsDisplay = true }
     }
 
     func redrawAll() { cards.forEach { $0.needsDisplay = true; $0.displayIfNeeded() } }
@@ -1810,16 +1965,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let tempMon = TempMonitor.shared
     private let model = StatsModel()
     private lazy var panel = PanelController(model: model)
-    private var runner = Runner.all.first { $0.id == UserDefaults.standard.string(forKey: "runner") } ?? Runner.cat
-    private lazy var frames = runner.frames()
+    private var runner = Runner.all.first { $0.id == UserDefaults.standard.string(forKey: "runner") } ?? Runner.coffee   // 默认咖啡
+    private lazy var frames = runner.frames(appearance: statusItem.button?.effectiveAppearance)
+    private var appearanceObservation: NSKeyValueObservation?
+    private var lastDark: Bool?
+    private var lastTemps: Temps?
+    private var lastTempsAt: CFTimeInterval = 0
     private var frameIndex = 0
     private var animTimer: Timer?
     private var sampleTimer: Timer?
     private var usage = 0.0
 
     /// 菜单栏文字显示什么
-    private var barMetric = UserDefaults.standard.string(forKey: "barMetric")
-        ?? ((UserDefaults.standard.object(forKey: "showPercent") as? Bool ?? true) ? "cpu" : "none")
+    /// 菜单栏旁边显示什么；默认不显示（只有 runner 图标）
+    private var barMetric = UserDefaults.standard.string(forKey: "barMetric") ?? "none"
     private static var barOptions: [(String, String)] {
         [("cpu", "CPU"), ("gpu", "GPU"), ("memory", L("内存", "Memory")), ("battery", L("电池", "Battery")),
          ("network", L("网络", "Network")), ("temp", L("芯片温度", "SoC Temperature")),
@@ -1842,6 +2001,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         buildSettingsMenu()
+        appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] b, _ in
+            // 彩色 runner 的猫身颜色随深浅色变；只在深 / 浅真正切换时重画（这个通知会频繁触发）
+            guard let self, !self.runner.template else { return }
+            let dark = b.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            guard dark != self.lastDark else { return }
+            self.lastDark = dark
+            self.frames = self.runner.frames(appearance: b.effectiveAppearance)
+        }
+        // 存储页要用的各应用大小：启动后在后台慢慢算好
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in self?.panel.detail.prewarmStorage() }
         panel.onSettings = { [weak self] v in self?.popSettings(from: v) }
 
         panel.onVisibilityChange = { [weak self] open in
@@ -1962,7 +2131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch key {
         case "runner":
             guard let r = Runner.all.first(where: { $0.id == id }) else { return }
-            runner = r; frames = r.frames(); frameIndex = 0
+            runner = r; frames = r.frames(appearance: statusItem.button?.effectiveAppearance); frameIndex = 0
             UserDefaults.standard.set(id, forKey: "runner")
             updateStatusImage()
         case "barMetric":
@@ -2016,7 +2185,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func sample() {
         let l = cpu.load()
         usage = l.total
-        let g = GPUMonitor.usage(), m = SystemInfo.memory(), n = netMon.rate(), t = tempMon.read()
+        let needTemps = panel.isVisible || barMetric == "temp" || barMetric == "batTemp"
+        // 温度每 2 秒最多读一次（读一次 ~30ms，温度也不会变那么快）
+        if lastTemps == nil || (needTemps && CACurrentMediaTime() - lastTempsAt >= 2) { lastTemps = tempMon.read(); lastTempsAt = CACurrentMediaTime() }
+        let g = GPUMonitor.usage(), m = SystemInfo.memory(), n = netMon.rate(), t = lastTemps ?? Temps()
         switch speedSource {           // Runner 跟随哪个指标变快
         case "gpu":    usage = g ?? 0
         case "memory": usage = m.used / m.total
@@ -2138,9 +2310,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// CPU 越高跑得越快：0% → 0.2s/帧，100% → 0.03s/帧
+    /// CPU 越高跑得越快：0% → 0.2s/帧，100% → 0.067s/帧
     private func scheduleAnimation() {
-        let interval = 0.2 - 0.17 * min(max(usage, 0), 1)
+        // 0% → 5 帧/秒，100% → 15 帧/秒（再快肉眼差别不大，但菜单栏重绘开销翻倍）
+        let interval = 0.2 - 0.133 * min(max(usage, 0), 1)
         animTimer?.invalidate()
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -2178,6 +2351,50 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--stats" {
           "ssd", t.ssd.map { String(format: "%.1f", $0) } ?? "nil")
     print("network up", NetMonitor.format(nr.up), "down", NetMonitor.format(nr.down))
     for a in ProcessMemory.top(10) { print("  mem", ProcessMemory.format(a.bytes), "×\(a.processes)", a.name) }
+    exit(0)
+}
+
+// MenuRunner --runner <id> out.png：单个 runner 放大 12 倍，上行深色背景、下行浅色背景
+if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "--runner",
+   let r = Runner.all.first(where: { $0.id == CommandLine.arguments[2] }) {
+    let sc: CGFloat = 12, fw = r.size.width * sc, fh = r.size.height * sc
+    let frames = r.frames()
+    let sheet = NSImage(size: NSSize(width: fw * CGFloat(frames.count), height: fh * 2), flipped: true) { _ in
+        for (row, bg) in [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.93, alpha: 1)].enumerated() {
+            bg.setFill(); NSRect(x: 0, y: CGFloat(row) * fh, width: fw * CGFloat(frames.count), height: fh).fill()
+            NSGraphicsContext.current?.imageInterpolation = .none
+            for (i, img) in frames.enumerated() {
+                img.draw(in: NSRect(x: CGFloat(i) * fw, y: CGFloat(row) * fh, width: fw, height: fh), from: .zero,
+                         operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            }
+        }
+        return true
+    }
+    let rep = NSBitmapImageRep(data: sheet.tiffRepresentation!)!
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[3]))
+    exit(0)
+}
+
+// MenuRunner --bench：每项采样跑 20 次，打印平均耗时
+if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--bench" {
+    func bench(_ name: String, _ f: () -> Void) {
+        let t0 = CACurrentMediaTime(); for _ in 0..<20 { f() }
+        print(String(format: "%-16@ %7.2f ms", name as NSString, (CACurrentMediaTime() - t0) / 20 * 1000))
+    }
+    let c = CPUMonitor(), n = NetMonitor(), tm = TempMonitor.shared
+    bench("cpu") { _ = c.load() }
+    bench("gpu") { _ = GPUMonitor.usage() }
+    bench("memory") { _ = SystemInfo.memory() }
+    bench("storage") { _ = SystemInfo.storage() }
+    bench("battery") { _ = SystemInfo.battery() }
+    bench("health") { _ = SystemInfo.batteryHealth() }
+    bench("batteryTime") { _ = SystemInfo.batteryTime() }
+    bench("temps") { _ = tm.read() }
+    bench("network") { _ = n.rate() }
+    bench("pressure") { _ = SystemInfo.memoryPressure() }
+    let frames = Runner.coffee.frames()
+    bench("coffee frames") { _ = Runner.coffee.frames() }
+    _ = frames
     exit(0)
 }
 
