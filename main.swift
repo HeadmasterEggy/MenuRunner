@@ -1750,12 +1750,22 @@ final class PanelController: NSObject, NSPopoverDelegate {
         settle(); settleUntil += 0.6                    // 打开时从 0 长出来，多给一点时间
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         startTimer()
+        // 点其他地方就收起：菜单栏小工具不是激活应用，popover 的 .transient 收不到“失去焦点”，
+        // 所以自己监听别的应用里的鼠标按下（全局监听不会收到本应用面板里的点击）
+        if outsideMonitor == nil {
+            outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
+                self?.hide()
+            }
+        }
         onVisibilityChange(true)
     }
 
     func hide() { popover.performClose(nil) }
 
+    private var outsideMonitor: Any?
+
     func popoverDidClose(_ notification: Notification) {
+        if let m = outsideMonitor { NSEvent.removeMonitor(m); outsideMonitor = nil }
         timer?.invalidate(); timer = nil
         if cards.first !== mainPage.cards.first { backToMain() }
         onVisibilityChange(false)
