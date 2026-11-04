@@ -11,7 +11,9 @@
 ![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-555?style=flat-square)
 
-<img src="docs/panel.png" width="300" alt="Panel">&nbsp;&nbsp;<img src="docs/memory.png" width="300" alt="Memory usage by app">&nbsp;&nbsp;<img src="docs/settings.png" width="200" alt="Settings">
+<img src="docs/panel.png" width="260" alt="Panel">&nbsp;&nbsp;<img src="docs/cpu.png" width="260" alt="CPU details">&nbsp;&nbsp;<img src="docs/memory.png" width="260" alt="Memory usage by app">
+
+<img src="docs/settings.png" width="200" alt="Settings">
 
 <img src="docs/runners.png" alt="Runners">
 
@@ -24,10 +26,11 @@
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
   - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version
   - CPU (System / User / Idle) and GPU history charts
-  - Memory breakdown (App / Wired / Compressed) — click the card to see which apps use the most memory
+  - Memory breakdown (App / Wired / Compressed)
   - Storage ring, battery level, health and cycle count
   - Temperatures — SoC, battery, SSD
   - Network upload / download speed
+  - **Click any card for details** — per-core CPU and top apps by CPU, GPU utilization and top apps by GPU, memory by app, every temperature sensor, all volumes, full battery info (capacity, voltage, power, adapter), network interfaces and top apps by traffic, full machine spec
 - **Settings** — refresh rate (0.5 s / 1 s / 2 s), °C / °F, English / 简体中文, launch at login, open Activity Monitor.
 
 ## Install
