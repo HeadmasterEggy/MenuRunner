@@ -119,17 +119,39 @@ enum SystemInfo {
             return (L("充满还需", "Until full"), mins > 0 ? fmt(mins) : L("计算中…", "Calculating…"))
         }
         if b.state == "ac" { return (L("续航", "Battery"), L("已接电源", "On AC power")) }
-        let est = IOPSGetTimeRemainingEstimate()        // 秒；-1 = 计算中，-2 = 接电源
-        if est > 0 { return (L("预计可用", "Time left"), fmt(Int(est / 60))) }
-        // 系统还在估算：用 当前容量 ÷ 放电电流 自己算一个
+        let left = (L("预计可用", "Time left"))
+        // 1. 电源信息里的“距离耗尽分钟数”（-1 = 还在估算）
+        if let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+           let list = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef] {
+            for ps in list {
+                if let d = IOPSGetPowerSourceDescription(blob, ps)?.takeUnretainedValue() as? [String: Any],
+                   let m = d[kIOPSTimeToEmptyKey] as? Int, m > 0 { return (left, fmt(m)) }
+            }
+        }
+        // 2. 系统估算（秒）
+        let est = IOPSGetTimeRemainingEstimate()
+        if est > 0 { return (left, fmt(Int(est / 60))) }
+        // 3. 电池自己上报的平均剩余时间（刚拔电时系统估算还没出来，这里往往已经有值）
         let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("AppleSmartBattery"))
         defer { if svc != 0 { IOObjectRelease(svc) } }
         func num(_ k: String) -> NSNumber? { IORegistryEntryCreateCFProperty(svc, k as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber }
-        let ma = Double(Int32(truncatingIfNeeded: num("InstantAmperage")?.int64Value ?? 0))
-        if let cap = num("AppleRawCurrentCapacity")?.doubleValue, ma < -50 {
-            return (L("预计可用", "Time left"), "≈ " + fmt(Int(cap / -ma * 60)))
+        for k in ["AvgTimeToEmpty", "TimeRemaining"] {
+            if let m = num(k)?.intValue, m > 0, m < 65535 { return (left, fmt(m)) }
+        }
+        // 4. 自己算：满充容量 × 当前百分比 ÷ 放电电流
+        let ma = Double(Int32(truncatingIfNeeded: num("InstantAmperage")?.int64Value ?? num("Amperage")?.int64Value ?? 0))
+        let data = IORegistryEntryCreateCFProperty(svc, "BatteryData" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any]
+        let full = num("NominalChargeCapacity")?.doubleValue ?? (data?["NominalChargeCapacity"] as? NSNumber)?.doubleValue
+        if let full, ma < -50 {
+            return (left, "≈ " + fmt(Int(full * Double(b.percent) / 100 / -ma * 60)))
         }
         return (L("预计可用", "Time left"), L("计算中…", "Calculating…"))
+    }
+
+    /// 内存压力（与活动监视器一致）：1 正常，2 偏高，4 紧张
+    static func memoryPressure() -> Int {
+        var v: Int32 = 0, size = MemoryLayout<Int32>.size
+        return sysctlbyname("kern.memorystatus_vm_pressure_level", &v, &size, nil, 0) == 0 ? Int(v) : 1
     }
 
     static func gb(_ bytes: Double) -> String { String(format: "%.1f GB", bytes / 1_073_741_824) }
@@ -1233,6 +1255,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         self.model = model
         super.init()
         popover.behavior = .transient          // 点外面自动关闭
+        if CommandLine.arguments.contains("--light") { popover.appearance = NSAppearance(named: .aqua) }
         popover.animates = true
         popover.delegate = self
         build()
@@ -1316,6 +1339,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private var kvRows: [(String, String)] = []
 
     func debugShow(_ k: DetailKind) { showDetail(k) }
+    var debugMainView: NSView { mainPage.view }
+    var debugCardFrames: [NSRect] { mainPage.cards.map { $0.frame } }
 
     private func key(_ k: DetailKind) -> String { "\(k)" }
 
@@ -1563,6 +1588,13 @@ final class PanelController: NSObject, NSPopoverDelegate {
     @objc private func settingsClicked(_ sender: NSButton) { onSettings(sender) }
 
     var isVisible: Bool { popover.isShown }
+    var onMainPage: Bool { cards.first === mainPage.cards.first }
+
+    /// 主页打开时随采样更新“最忙应用”和内存压力
+    func sampleMain() {
+        memoryPressure = SystemInfo.memoryPressure()
+        if isVisible && onMainPage { detail.refresh(.cpu) }
+    }
 
     func show(below button: NSStatusBarButton) {
         model.resetShown()                      // 数字从 0 滚动、条形从空长满
@@ -1618,6 +1650,13 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let m = model
         Draw.title("cpu", "CPU", in: w, tint: .systemBlue)
         Draw.text(Draw.pct(m.v("cpu")), NSPoint(x: w - 14, y: 6), size: 24, weight: .semibold, right: true, mono: true)
+        if let top = detail.cpuApps.first, onMainPage {   // 最忙的应用
+            ProcessMemory.icon(top.path).draw(in: NSRect(x: 14, y: 29, width: 12, height: 12), from: .zero, operation: .sourceOver,
+                                              fraction: 1, respectFlipped: true, hints: nil)
+            let cores = Double(max(spec.pCores + spec.eCores, 1))   // 换算成占整机 CPU 的比例，与上面的总数一致
+            Draw.text(L("最忙：", "Busiest: ") + top.name + String(format: "  %.0f%%", top.value / cores * 100),
+                      NSPoint(x: 30, y: 28), size: 10, color: .glassSecondary)
+        }
         let chart = NSRect(x: 14, y: 44, width: w - 28, height: 56)
         Draw.chartBackground(chart)
         Draw.area(chart, m.cpuHistory.map { $0.system + $0.user }, scroll: m.scroll, color: .systemBlue)
@@ -1652,9 +1691,22 @@ final class PanelController: NSObject, NSPopoverDelegate {
         }
     }
 
+    var memoryPressure = 1
+
     private func drawMemory(_ w: CGFloat) {
         let m = model
         Draw.title("memorychip", L("内存", "Memory"), in: w, tint: .systemPurple)
+        // 内存压力标签
+        let level = memoryPressure
+        let (ptext, pcolor): (String, NSColor) = level >= 4 ? (L("压力紧张", "Critical"), .systemRed)
+            : (level >= 2 ? (L("压力偏高", "Elevated"), .systemOrange) : (L("压力正常", "Normal"), .systemGreen))
+        let titleW = NSAttributedString(string: L("内存", "Memory"), attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).size().width
+        let label = NSAttributedString(string: ptext,
+                                       attributes: [.font: NSFont.systemFont(ofSize: 9, weight: .semibold), .foregroundColor: pcolor])
+        let bx = 14 + 18 + 6 + titleW + 18, bw = label.size().width + 12
+        pcolor.withAlphaComponent(0.18).setFill()
+        NSBezierPath(roundedRect: NSRect(x: bx, y: 12, width: bw, height: 16), xRadius: 8, yRadius: 8).fill()
+        label.draw(at: NSPoint(x: bx + 6, y: 13.5))
         Draw.text("\(SystemInfo.gb(m.v("memUsed"))) / \(SystemInfo.gb(m.memory.total))  \(Draw.pct(m.v("mem")))",
                   NSPoint(x: w - 14, y: 13), size: 11, color: .glassSecondary, right: true, mono: true)
         let bar = NSRect(x: 14, y: 40, width: w - 28, height: 10)
@@ -1972,6 +2024,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let bat = SystemInfo.battery()
         panel.updateBatteryTime()
+        panel.sampleMain()
         model.update(cpu: l, gpu: g, memory: m, storage: SystemInfo.storage(), battery: bat,
                      health: SystemInfo.batteryHealth(), temps: t, net: n)
         let pct = Draw.pct
@@ -2119,6 +2172,7 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--stats" {
     print("memory", SystemInfo.gb(m.used), "/", SystemInfo.gb(m.total))
     print("storage", SystemInfo.storage().map { "\(SystemInfo.gb($0.used)) / \(SystemInfo.gb($0.total))" } ?? "nil")
     print("battery", SystemInfo.battery().map { "\($0.percent)% \(SystemInfo.stateText($0.state))" } ?? "nil")
+    print("battery time", SystemInfo.batteryTime().map { "\($0.label): \($0.value)" } ?? "nil", "estimate", IOPSGetTimeRemainingEstimate())
     print("health", SystemInfo.batteryHealth().map { "\(Draw.pct($0.health)) cycles \($0.cycles)/\($0.designCycles)" } ?? "nil")
     print("temps soc", t.soc.map { String(format: "%.1f", $0) } ?? "nil", "battery", t.battery.map { String(format: "%.1f", $0) } ?? "nil",
           "ssd", t.ssd.map { String(format: "%.1f", $0) } ?? "nil")
@@ -2142,6 +2196,45 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--preview" {
     }
     let rep = NSBitmapImageRep(data: sheet.tiffRepresentation!)!
     try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[2]))
+    exit(0)
+}
+
+// 调试：MenuRunner --render out.png  离屏渲染主面板（左浅色 / 右深色；玻璃用近似底色代替）
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--render" {
+    _ = NSApplication.shared
+    let model = StatsModel(), cpu = CPUMonitor(), net = NetMonitor()
+    _ = cpu.load(); _ = net.rate(); Thread.sleep(forTimeInterval: 0.6)
+    for _ in 0..<3 {
+        model.update(cpu: cpu.load(), gpu: GPUMonitor.usage(), memory: SystemInfo.memory(), storage: SystemInfo.storage(),
+                     battery: SystemInfo.battery(), health: SystemInfo.batteryHealth(), temps: TempMonitor.shared.read(), net: net.rate())
+        Thread.sleep(forTimeInterval: 0.3)
+    }
+    model.tick(dt: 10)
+    let panel = PanelController(model: model)
+    panel.updateBatteryTime()
+    panel.memoryPressure = SystemInfo.memoryPressure()
+    panel.detail.refresh(.cpu); Thread.sleep(forTimeInterval: 0.8); panel.detail.refresh(.cpu)
+    let v = panel.debugMainView, sz = v.frame.size
+    let sheet = NSImage(size: NSSize(width: sz.width * 2 + 20, height: sz.height), flipped: false) { _ in
+        for (i, name) in [NSAppearance.Name.aqua, .darkAqua].enumerated() {
+            let ox = CGFloat(i) * (sz.width + 20)
+            NSAppearance(named: name)!.performAsCurrentDrawingAppearance {
+                (i == 0 ? NSColor(calibratedRed: 0.86, green: 0.88, blue: 0.93, alpha: 1) : NSColor(white: 0.12, alpha: 1)).setFill()
+                NSRect(x: ox, y: 0, width: sz.width, height: sz.height).fill()
+                for f in panel.debugCardFrames {   // 近似玻璃底色
+                    (i == 0 ? NSColor.white.withAlphaComponent(0.55) : NSColor.white.withAlphaComponent(0.08)).setFill()
+                    NSBezierPath(roundedRect: f.offsetBy(dx: ox, dy: 0), xRadius: 18, yRadius: 18).fill()
+                }
+            }
+            v.appearance = NSAppearance(named: name)
+            let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds)!
+            v.cacheDisplay(in: v.bounds, to: rep)
+            rep.draw(in: NSRect(x: ox, y: 0, width: sz.width, height: sz.height), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+        return true
+    }
+    let out = NSBitmapImageRep(data: sheet.tiffRepresentation!)!
+    try! out.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[2]))
     exit(0)
 }
 
