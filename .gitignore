@@ -1,3 +1,4 @@
 MenuRunner.app/
 .DS_Store
 *.ips
+dist/
