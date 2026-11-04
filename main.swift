@@ -1311,7 +1311,7 @@ enum Draw {
     }
 
     /// 平滑滚动的面积图：最新点从右侧滑入；values 为 0~1
-    static func area(_ r: NSRect, _ values: [Double], scroll: Double, color: NSColor, line: Bool = false) {
+    static func area(_ r: NSRect, _ values: [Double], scroll: Double, color: NSColor, line: Bool = false, dot: Bool = false) {
         guard values.count >= 2 else { return }
         let step = r.width / CGFloat(StatsModel.historyLength - 2)
         let shift = step * CGFloat(1 - scroll)
@@ -1339,33 +1339,68 @@ enum Draw {
             path.lineWidth = 1.6; color.setStroke(); path.stroke()
         }
         NSGraphicsContext.restoreGraphicsState()
+        if dot {   // “现在”的位置：曲线与右边缘相交处，随滚动平滑移动
+            let a = pt(values.count - 2), b = pt(values.count - 1)
+            let y = a.y + (b.y - a.y) * CGFloat(scroll)
+            let c = NSPoint(x: r.maxX - 1, y: min(max(y, r.minY + 3), r.maxY - 3))
+            NSColor.white.withAlphaComponent(0.9).setFill()
+            NSBezierPath(ovalIn: NSRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8)).fill()
+            color.setFill()
+            NSBezierPath(ovalIn: NSRect(x: c.x - 2.6, y: c.y - 2.6, width: 5.2, height: 5.2)).fill()
+        }
     }
 
-    static func chartBackground(_ r: NSRect) {
+    static func chartBackground(_ r: NSRect, grid: Bool = true) {
         NSColor.labelColor.withAlphaComponent(0.09).setFill()
         NSBezierPath(roundedRect: r, xRadius: 8, yRadius: 8).fill()
+        guard grid else { return }
+        // 25% / 50% / 75% 参考线（虚线）
+        NSColor.labelColor.withAlphaComponent(0.08).setStroke()
+        for f in [0.25, 0.5, 0.75] {
+            let y = r.maxY - r.height * CGFloat(f)
+            let line = NSBezierPath()
+            line.lineWidth = 0.5
+            line.setLineDash([2, 3], count: 2, phase: 0)
+            line.move(to: NSPoint(x: r.minX + 6, y: y)); line.line(to: NSPoint(x: r.maxX - 6, y: y))
+            line.stroke()
+        }
     }
 }
 
 // MARK: - 卡片：一块液态玻璃 + 自绘内容
 final class CardView: NSView {
     var continuous = false                 // 带滚动曲线的卡片：每帧都要重画
+    /// 列表卡片：根据鼠标位置返回所在行的应用路径（nil = 不在可点的行上）
+    var rowAt: ((NSPoint) -> String?)?
+    private(set) var hoverPoint: NSPoint?
+    static var drawingHover: NSPoint?      // 绘制时当前卡片的鼠标位置，供列表画高亮
     var drawer: (CGFloat) -> Void = { _ in }
     var onClick: (() -> Void)?
     private var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }
     private var pressed = false { didSet { if pressed != oldValue { needsDisplay = true } } }
     override func mouseDown(with event: NSEvent) { if onClick != nil { pressed = true } }
     override func mouseUp(with event: NSEvent) {
-        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        let p = convert(event.locationInWindow, from: nil)
+        let inside = bounds.contains(p)
         pressed = false
+        if inside, let path = rowAt?(p) {        // 点击列表里的应用：在访达中显示
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            return
+        }
         if inside { onClick?() }
     }
+    override func mouseMoved(with event: NSEvent) {
+        guard rowAt != nil else { return }
+        hoverPoint = convert(event.locationInWindow, from: nil)
+        needsDisplay = true
+        if let p = hoverPoint, rowAt?(p) != nil { NSCursor.pointingHand.set() } else { NSCursor.arrow.set() }
+    }
     override func mouseEntered(with event: NSEvent) { hovered = onClick != nil }
-    override func mouseExited(with event: NSEvent) { hovered = false; pressed = false }
+    override func mouseExited(with event: NSEvent) { hovered = false; pressed = false; hoverPoint = nil; if rowAt != nil { needsDisplay = true } }
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect], owner: self))
     }
     override func resetCursorRects() { if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) } }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -1377,7 +1412,9 @@ final class CardView: NSView {
             NSColor.labelColor.withAlphaComponent(pressed ? 0.12 : 0.05).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 18, yRadius: 18).fill()
         }
+        CardView.drawingHover = rowAt != nil ? hoverPoint : nil
         drawer(bounds.width)
+        CardView.drawingHover = nil
     }
 }
 
@@ -1517,6 +1554,20 @@ final class PanelController: NSObject, NSPopoverDelegate {
                 b.frame = NSRect(x: 10, y: 16, width: 24, height: 24)
                 card.addSubview(b)
             })
+            // 列表卡片（最后一张）：悬停高亮、点击在访达中显示
+            if let list = p.cards.last {
+                switch k {
+                case .memory:
+                    list.rowAt = { [weak self] pt in self.flatMap { $0.rowHit(pt, top: 12, paths: $0.detail.memApps.map { $0.path }) } }
+                case .cpu, .gpu, .network, .storage:
+                    list.rowAt = { [weak self] pt in
+                        guard let self else { return nil }
+                        let apps = k == .cpu ? self.detail.cpuApps : k == .gpu ? self.detail.gpuApps : k == .network ? self.detail.netApps : self.detail.appSizes
+                        return self.rowHit(pt, top: 36, paths: apps.map { $0.path })
+                    }
+                default: break
+                }
+            }
             detailPages[key(k)] = p
             return p
         }()
@@ -1566,6 +1617,20 @@ final class PanelController: NSObject, NSPopoverDelegate {
         Draw.text(h.value, NSPoint(x: w - 14, y: 12), size: 15, weight: .semibold, right: true, mono: true)
     }
 
+    /// 鼠标悬停在这一行上时画高亮，并在右侧提示可在访达中显示
+    private func rowHighlight(_ y: CGFloat, _ w: CGFloat, clickable: Bool) {
+        guard clickable, let h = CardView.drawingHover, h.y >= y - 4, h.y < y + 26 else { return }
+        NSColor.labelColor.withAlphaComponent(0.07).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 8, y: y - 4, width: w - 16, height: 30), xRadius: 8, yRadius: 8).fill()
+    }
+
+    /// 列表行命中：top = 第一行的 y，返回该行应用的路径
+    private func rowHit(_ p: NSPoint, top: CGFloat, paths: [String?]) -> String? {
+        guard p.y >= top - 4 else { return nil }
+        let i = Int((p.y - top + 4) / 30)
+        return i < paths.count ? paths[i] : nil
+    }
+
     private func sectionTitle(_ s: String) { Draw.text(s, NSPoint(x: 14, y: 12), size: 11, weight: .semibold, color: .glassSecondary) }
 
     private func drawKV(_ w: CGFloat) {
@@ -1609,6 +1674,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let maxV = max(apps.first?.value ?? 1, 0.0001)
         var y: CGFloat = 36
         for a in apps {
+            rowHighlight(y, w, clickable: a.path != nil)
             ProcessMemory.icon(a.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             Draw.text(a.processes > 1 ? "\(a.name)  ×\(a.processes)" : a.name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium)
             Draw.text(fmt(a.value), NSPoint(x: w - 14, y: y + 1), size: 12, weight: .medium, right: true, mono: true)
@@ -1718,6 +1784,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let maxBytes = Double(procs.first?.bytes ?? 1)
         var y: CGFloat = 12
         for p in procs {
+            rowHighlight(y, w, clickable: p.path != nil)
             ProcessMemory.icon(p.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver,
                                             fraction: 1, respectFlipped: true, hints: nil)
             let name = p.processes > 1 ? "\(p.name)  ×\(p.processes)" : p.name
@@ -1824,7 +1891,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         }
         let chart = NSRect(x: 14, y: 44, width: w - 28, height: 56)
         Draw.chartBackground(chart)
-        Draw.area(chart, m.cpuHistory.map { $0.system + $0.user }, scroll: m.scroll, color: .systemBlue)
+        Draw.area(chart, m.cpuHistory.map { $0.system + $0.user }, scroll: m.scroll, color: .systemBlue, dot: true)
         Draw.area(chart, m.cpuHistory.map { $0.system }, scroll: m.scroll, color: .systemOrange)
         var x: CGFloat = 14
         for (name, key, c) in [("System", "sys", NSColor.systemOrange), ("User", "user", .systemBlue), ("Idle", "idle", .glassTertiary)] {
@@ -1840,12 +1907,27 @@ final class PanelController: NSObject, NSPopoverDelegate {
         Draw.text(m.gpu == nil ? "--" : Draw.pct(m.v("gpu")), NSPoint(x: w - 14, y: 8), size: 20, weight: .semibold, right: true, mono: true)
         let chart = NSRect(x: 14, y: 44, width: w - 28, height: 60)
         Draw.chartBackground(chart)
-        Draw.area(chart, m.gpuHistory, scroll: m.scroll, color: .systemGreen)
+        Draw.area(chart, m.gpuHistory, scroll: m.scroll, color: .systemGreen, dot: true)
     }
 
     private func drawTemps(_ w: CGFloat) {
         let m = model
-        Draw.title("thermometer.medium", L("温度", "Temperature"), in: w, tint: .systemOrange)
+        Draw.title("thermometer.medium", L("温度", "Temp"), in: w, tint: .systemOrange)   // 半宽卡片：英文用缩写，给散热标签留位置
+        // 系统散热状态（macOS 据此决定是否降频）
+        let (ttext, tcolor): (String, NSColor) = {
+            switch ProcessInfo.processInfo.thermalState {
+            case .nominal:  return (L("正常", "Normal"), .systemGreen)
+            case .fair:     return (L("偏热", "Warm"), .systemYellow)
+            case .serious:  return (L("很热", "Hot"), .systemOrange)
+            case .critical: return (L("过热", "Critical"), .systemRed)
+            @unknown default: return ("--", .glassSecondary)
+            }
+        }()
+        let tl = NSAttributedString(string: ttext, attributes: [.font: NSFont.systemFont(ofSize: 9, weight: .semibold), .foregroundColor: tcolor])
+        let tw = tl.size().width + 12
+        tcolor.withAlphaComponent(0.18).setFill()
+        NSBezierPath(roundedRect: NSRect(x: w - 14 - tw, y: 12, width: tw, height: 16), xRadius: 8, yRadius: 8).fill()
+        tl.draw(at: NSPoint(x: w - 14 - tw + 6, y: 13.5))
         var y: CGFloat = 40
         for (name, key, has) in [(L("芯片", "SoC"), "tSoc", m.temps.soc != nil), (L("电池", "Battery"), "tBat", m.temps.battery != nil), ("SSD", "tSsd", m.temps.ssd != nil)] {
             let c = m.v(key)
@@ -1961,7 +2043,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let chart = NSRect(x: 14, y: 40, width: w - 28, height: 42)
         Draw.chartBackground(chart)
         let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024)
-        Draw.area(chart, m.netHistory.map { $0.down / peak }, scroll: m.scroll, color: .systemTeal)
+        Draw.area(chart, m.netHistory.map { $0.down / peak }, scroll: m.scroll, color: .systemTeal, dot: true)
         Draw.area(chart, m.netHistory.map { $0.up / peak }, scroll: m.scroll, color: .systemPink, line: true)
         Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 6, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
     }
