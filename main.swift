@@ -564,6 +564,12 @@ final class StatsModel {
 }
 
 // MARK: - 绘制工具
+extension NSColor {
+    /// 玻璃上的次要文字：比系统 secondaryLabelColor 更实，保证对比度
+    static var glassSecondary: NSColor { NSColor.labelColor.withAlphaComponent(0.72) }
+    static var glassTertiary: NSColor { NSColor.labelColor.withAlphaComponent(0.5) }
+}
+
 enum Draw {
     static func text(_ s: String, _ p: NSPoint, size: CGFloat = 12, weight: NSFont.Weight = .regular,
                      color: NSColor = .labelColor, right: Bool = false, mono: Bool = false) {
@@ -582,8 +588,8 @@ enum Draw {
     }
 
     /// 卡片标题：图标 + 名称
-    static func title(_ icon: String, _ name: String, in w: CGFloat) {
-        let iw = symbol(icon, NSPoint(x: 14, y: 12))
+    static func title(_ icon: String, _ name: String, in w: CGFloat, tint: NSColor = .labelColor) {
+        let iw = symbol(icon, NSPoint(x: 14, y: 12), size: 13, color: tint)
         text(name, NSPoint(x: 14 + max(iw, 14) + 6, y: 12), size: 12, weight: .semibold)
     }
 
@@ -594,7 +600,7 @@ enum Draw {
 
     static func bar(_ r: NSRect, _ f: Double, _ color: NSColor) {
         let rad = r.height / 2
-        NSColor.labelColor.withAlphaComponent(0.1).setFill()
+        NSColor.labelColor.withAlphaComponent(0.16).setFill()
         NSBezierPath(roundedRect: r, xRadius: rad, yRadius: rad).fill()
         guard f > 0.005 else { return }
         color.setFill()
@@ -634,7 +640,7 @@ enum Draw {
     }
 
     static func chartBackground(_ r: NSRect) {
-        NSColor.labelColor.withAlphaComponent(0.05).setFill()
+        NSColor.labelColor.withAlphaComponent(0.09).setFill()
         NSBezierPath(roundedRect: r, xRadius: 8, yRadius: 8).fill()
     }
 }
@@ -695,7 +701,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             let frame = NSRect(x: M + x, y: M + H - top - h, width: w, height: h)
             let glass = NSGlassEffectView(frame: frame)
             glass.cornerRadius = 18
-            glass.style = .clear
+            glass.style = .regular
             glassHolder.addSubview(glass)
             let card = CardView(frame: frame)
             card.drawer = d
@@ -705,7 +711,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
                 let b = NSButton(image: NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")!,
                                  target: self, action: #selector(settingsClicked(_:)))
                 b.isBordered = false
-                b.contentTintColor = .secondaryLabelColor
+                b.contentTintColor = .labelColor
                 b.frame = NSRect(x: w - 38, y: 16, width: 24, height: 24)
                 card.addSubview(b)
             }
@@ -763,29 +769,29 @@ final class PanelController: NSObject, NSPopoverDelegate {
         Draw.symbol(icon, NSPoint(x: 14, y: 10), size: 15, color: .labelColor)
         Draw.text(spec.model, NSPoint(x: 42, y: 8), size: 13, weight: .semibold)
         let mw = NSAttributedString(string: spec.model, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]).size().width
-        Draw.text(spec.summary, NSPoint(x: 42 + mw + 8, y: 9), size: 12, weight: .medium, color: .secondaryLabelColor)
-        Draw.text(spec.detail, NSPoint(x: 42, y: 29), size: 10, color: .secondaryLabelColor)
+        Draw.text(spec.summary, NSPoint(x: 42 + mw + 8, y: 9), size: 12, weight: .medium, color: .glassSecondary)
+        Draw.text(spec.detail, NSPoint(x: 42, y: 29), size: 10, color: .glassSecondary)
     }
 
     private func drawCPU(_ w: CGFloat) {
         let m = model
-        Draw.title("cpu", "CPU", in: w)
+        Draw.title("cpu", "CPU", in: w, tint: .systemBlue)
         Draw.text(Draw.pct(m.v("cpu")), NSPoint(x: w - 14, y: 6), size: 24, weight: .semibold, right: true, mono: true)
         let chart = NSRect(x: 14, y: 44, width: w - 28, height: 56)
         Draw.chartBackground(chart)
         Draw.area(chart, m.cpuHistory.map { $0.system + $0.user }, scroll: m.scroll, color: .systemBlue)
         Draw.area(chart, m.cpuHistory.map { $0.system }, scroll: m.scroll, color: .systemOrange)
         var x: CGFloat = 14
-        for (name, key, c) in [("System", "sys", NSColor.systemOrange), ("User", "user", .systemBlue), ("Idle", "idle", .tertiaryLabelColor)] {
+        for (name, key, c) in [("System", "sys", NSColor.systemOrange), ("User", "user", .systemBlue), ("Idle", "idle", .glassTertiary)] {
             c.setFill(); NSBezierPath(ovalIn: NSRect(x: x, y: 112, width: 7, height: 7)).fill()
-            Draw.text("\(name) \(Draw.pct(m.v(key)))", NSPoint(x: x + 11, y: 108), size: 11, color: .secondaryLabelColor, mono: true)
+            Draw.text("\(name) \(Draw.pct(m.v(key)))", NSPoint(x: x + 11, y: 108), size: 11, color: .glassSecondary, mono: true)
             x += (w - 28) / 3
         }
     }
 
     private func drawGPU(_ w: CGFloat) {
         let m = model
-        Draw.title("cpu.fill", "GPU", in: w)
+        Draw.title("cpu.fill", "GPU", in: w, tint: .systemGreen)
         Draw.text(m.gpu == nil ? "--" : Draw.pct(m.v("gpu")), NSPoint(x: w - 14, y: 8), size: 20, weight: .semibold, right: true, mono: true)
         let chart = NSRect(x: 14, y: 44, width: w - 28, height: 60)
         Draw.chartBackground(chart)
@@ -794,11 +800,11 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     private func drawTemps(_ w: CGFloat) {
         let m = model
-        Draw.title("thermometer.medium", L("温度", "Temperature"), in: w)
+        Draw.title("thermometer.medium", L("温度", "Temperature"), in: w, tint: .systemOrange)
         var y: CGFloat = 40
         for (name, key, has) in [(L("芯片", "SoC"), "tSoc", m.temps.soc != nil), (L("电池", "Battery"), "tBat", m.temps.battery != nil), ("SSD", "tSsd", m.temps.ssd != nil)] {
             let c = m.v(key)
-            Draw.text(name, NSPoint(x: 14, y: y), size: 11, color: .secondaryLabelColor)
+            Draw.text(name, NSPoint(x: 14, y: y), size: 11, color: .glassSecondary)
             Draw.text(has ? TempUnit.format(c) : "--", NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true, mono: true)
             Draw.bar(NSRect(x: 14, y: y + 17, width: w - 28, height: 4), has ? (c - 20) / 80 : 0, Draw.tempColor(c))
             y += 25
@@ -807,12 +813,12 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     private func drawMemory(_ w: CGFloat) {
         let m = model
-        Draw.title("memorychip", L("内存", "Memory"), in: w)
+        Draw.title("memorychip", L("内存", "Memory"), in: w, tint: .systemPurple)
         Draw.text("\(SystemInfo.gb(m.v("memUsed"))) / \(SystemInfo.gb(m.memory.total))  \(Draw.pct(m.v("mem")))",
-                  NSPoint(x: w - 14, y: 13), size: 11, color: .secondaryLabelColor, right: true, mono: true)
+                  NSPoint(x: w - 14, y: 13), size: 11, color: .glassSecondary, right: true, mono: true)
         let bar = NSRect(x: 14, y: 40, width: w - 28, height: 10)
         let shape = NSBezierPath(roundedRect: bar, xRadius: 5, yRadius: 5)
-        NSColor.labelColor.withAlphaComponent(0.1).setFill(); shape.fill()
+        NSColor.labelColor.withAlphaComponent(0.16).setFill(); shape.fill()
         NSGraphicsContext.saveGraphicsState(); shape.addClip()
         var x = bar.minX
         for (k, c) in [("app", NSColor.systemBlue), ("wired", .systemOrange), ("comp", .systemPurple)] {
@@ -824,42 +830,42 @@ final class PanelController: NSObject, NSPopoverDelegate {
         var lx: CGFloat = 14
         for (name, v, c) in [("App", m.memory.app, NSColor.systemBlue), (L("联动", "Wired"), m.memory.wired, .systemOrange), (L("压缩", "Compressed"), m.memory.compressed, .systemPurple)] {
             c.setFill(); NSBezierPath(ovalIn: NSRect(x: lx, y: 64, width: 7, height: 7)).fill()
-            Draw.text("\(name) \(SystemInfo.gb(v))", NSPoint(x: lx + 11, y: 60), size: 10, color: .secondaryLabelColor, mono: true)
+            Draw.text("\(name) \(SystemInfo.gb(v))", NSPoint(x: lx + 11, y: 60), size: 10, color: .glassSecondary, mono: true)
             lx += (w - 28) / 3
         }
     }
 
     private func drawStorage(_ w: CGFloat) {
         let m = model
-        Draw.title("internaldrive", L("存储", "Storage"), in: w)
+        Draw.title("internaldrive", L("存储", "Storage"), in: w, tint: .systemIndigo)
         guard let st = m.storage else { return }
         let f = m.v("disk")
         let center = NSPoint(x: 44, y: 76), r: CGFloat = 26
         let ring = NSBezierPath(); ring.lineWidth = 8
         ring.appendArc(withCenter: center, radius: r, startAngle: 0, endAngle: 360)
-        NSColor.labelColor.withAlphaComponent(0.1).setStroke(); ring.stroke()
+        NSColor.labelColor.withAlphaComponent(0.16).setStroke(); ring.stroke()
         let arc = NSBezierPath(); arc.lineWidth = 8; arc.lineCapStyle = .round
         arc.appendArc(withCenter: center, radius: r, startAngle: -90, endAngle: -90 + 360 * CGFloat(f), clockwise: false)
         Draw.level(f).setStroke(); arc.stroke()
         let s = NSAttributedString(string: Draw.pct(f), attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.labelColor])
         s.draw(at: NSPoint(x: center.x - s.size().width / 2, y: center.y - s.size().height / 2))
-        Draw.text(L("已用", "Used"), NSPoint(x: 84, y: 50), size: 10, color: .secondaryLabelColor)
+        Draw.text(L("已用", "Used"), NSPoint(x: 84, y: 50), size: 10, color: .glassSecondary)
         Draw.text(SystemInfo.gb(st.used), NSPoint(x: 84, y: 63), size: 11, weight: .medium, mono: true)
-        Draw.text(L("可用", "Free"), NSPoint(x: 84, y: 80), size: 10, color: .secondaryLabelColor)
+        Draw.text(L("可用", "Free"), NSPoint(x: 84, y: 80), size: 10, color: .glassSecondary)
         Draw.text(SystemInfo.gb(st.total - st.used), NSPoint(x: 84, y: 93), size: 11, weight: .medium, mono: true)
     }
 
     private func drawBattery(_ w: CGFloat) {
         let m = model
-        Draw.title("battery.100", L("电池", "Battery"), in: w)
+        Draw.title("battery.100", L("电池", "Battery"), in: w, tint: .systemGreen)
         guard let b = m.battery else {
-            Draw.text(L("无电池", "No battery"), NSPoint(x: 14, y: 44), size: 11, color: .secondaryLabelColor); return
+            Draw.text(L("无电池", "No battery"), NSPoint(x: 14, y: 44), size: 11, color: .glassSecondary); return
         }
         let f = m.v("bat")
         let body = NSRect(x: 14, y: 40, width: 46, height: 22)
         let outline = NSBezierPath(roundedRect: body, xRadius: 6, yRadius: 6)
-        outline.lineWidth = 1.5; NSColor.secondaryLabelColor.setStroke(); outline.stroke()
-        NSColor.secondaryLabelColor.setFill()
+        outline.lineWidth = 1.5; NSColor.glassSecondary.setStroke(); outline.stroke()
+        NSColor.glassSecondary.setFill()
         NSBezierPath(roundedRect: NSRect(x: body.maxX + 2, y: body.midY - 4, width: 3, height: 8), xRadius: 1.5, yRadius: 1.5).fill()
         (b.percent <= 20 ? NSColor.systemRed : (b.percent <= 40 ? .systemYellow : .systemGreen)).setFill()
         NSBezierPath(roundedRect: NSRect(x: body.minX + 3, y: body.minY + 3, width: (body.width - 6) * CGFloat(f), height: body.height - 6),
@@ -868,23 +874,23 @@ final class PanelController: NSObject, NSPopoverDelegate {
         Draw.text(Draw.pct(f), NSPoint(x: w - 14, y: 41), size: 18, weight: .semibold, right: true, mono: true)
         // 右上角：电池温度；标题旁：供电状态小图标（充电 = 闪电，接电源 = 插头）
         if m.temps.battery != nil {
-            Draw.text(TempUnit.format(m.v("tBat")), NSPoint(x: w - 14, y: 13), size: 10, weight: .medium, color: .secondaryLabelColor, right: true, mono: true)
+            Draw.text(TempUnit.format(m.v("tBat")), NSPoint(x: w - 14, y: 13), size: 10, weight: .medium, color: .glassSecondary, right: true, mono: true)
         }
         let titleW = 14 + 22 + 6 + NSAttributedString(string: L("电池", "Battery"), attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).size().width
         if b.state == "charging" { Draw.symbol("bolt.fill", NSPoint(x: titleW + 4, y: 12), size: 10, color: .systemYellow) }
-        else if b.state == "ac"  { Draw.symbol("powerplug.fill", NSPoint(x: titleW + 4, y: 12), size: 10, color: .secondaryLabelColor) }
+        else if b.state == "ac"  { Draw.symbol("powerplug.fill", NSPoint(x: titleW + 4, y: 12), size: 10, color: .glassSecondary) }
         if let h = m.health {
-            Draw.text(L("健康度", "Health"), NSPoint(x: 14, y: 72), size: 10, color: .secondaryLabelColor)
+            Draw.text(L("健康度", "Health"), NSPoint(x: 14, y: 72), size: 10, color: .glassSecondary)
             Draw.text(Draw.pct(m.v("health")), NSPoint(x: w - 14, y: 71), size: 11, weight: .medium, right: true, mono: true)
             Draw.bar(NSRect(x: 14, y: 87, width: w - 28, height: 4), m.v("health"), m.v("health") >= 0.8 ? .systemGreen : (m.v("health") >= 0.6 ? .systemYellow : .systemRed))
-            Draw.text(L("循环次数", "Cycles"), NSPoint(x: 14, y: 96), size: 10, color: .secondaryLabelColor)
+            Draw.text(L("循环次数", "Cycles"), NSPoint(x: 14, y: 96), size: 10, color: .glassSecondary)
             Draw.text("\(h.cycles) / \(h.designCycles)", NSPoint(x: w - 14, y: 95), size: 11, weight: .medium, right: true, mono: true)
         }
     }
 
     private func drawNetwork(_ w: CGFloat) {
         let m = model
-        Draw.title("network", L("网络", "Network"), in: w)
+        Draw.title("network", L("网络", "Network"), in: w, tint: .systemTeal)
         Draw.text("↓ " + NetMonitor.format(m.v("down")), NSPoint(x: w - 14, y: 13), size: 11, weight: .medium, color: .systemTeal, right: true, mono: true)
         Draw.text("↑ " + NetMonitor.format(m.v("up")), NSPoint(x: w - 120, y: 13), size: 11, weight: .medium, color: .systemPink, right: true, mono: true)
         let chart = NSRect(x: 14, y: 40, width: w - 28, height: 42)
@@ -892,7 +898,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024)
         Draw.area(chart, m.netHistory.map { $0.down / peak }, scroll: m.scroll, color: .systemTeal)
         Draw.area(chart, m.netHistory.map { $0.up / peak }, scroll: m.scroll, color: .systemPink, line: true)
-        Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 6, y: chart.minY + 3), size: 9, color: .tertiaryLabelColor, right: true, mono: true)
+        Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 6, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
     }
 }
 
