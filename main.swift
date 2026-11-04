@@ -2412,6 +2412,63 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--bench" {
     exit(0)
 }
 
+// MenuRunner --icon out.iconset：生成 app 图标（夜空渐变 + 像素橘猫火箭），再用 iconutil 打包成 .icns
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--icon" {
+    let dir = CommandLine.arguments[2]
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let sprite = Runner.rocketCat.frames()[1]                  // 选一帧尾焰较长的
+    func render(_ px: Int) -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        rep.size = NSSize(width: px, height: px)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        let k = CGFloat(px) / 1024
+        // Apple 图标模板：1024 画布里 824×824 的圆角方形，圆角 185
+        let body = NSRect(x: 100 * k, y: 100 * k, width: 824 * k, height: 824 * k)
+        let shape = NSBezierPath(roundedRect: body, xRadius: 185 * k, yRadius: 185 * k)
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow(); shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.shadowBlurRadius = 24 * k; shadow.shadowOffset = NSSize(width: 0, height: -10 * k); shadow.set()
+        NSColor.black.setFill(); shape.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        shape.addClip()
+        // 夜空渐变 + 中间的光晕
+        NSGradient(colors: [NSColor(srgbRed: 0.36, green: 0.22, blue: 0.62, alpha: 1),
+                            NSColor(srgbRed: 0.10, green: 0.12, blue: 0.32, alpha: 1)])!.draw(in: body, angle: -90)
+        NSGradient(colors: [NSColor(srgbRed: 1, green: 0.62, blue: 0.30, alpha: 0.30), NSColor(srgbRed: 1, green: 0.62, blue: 0.30, alpha: 0)])!
+            .draw(fromCenter: NSPoint(x: 540 * k, y: 500 * k), radius: 0, toCenter: NSPoint(x: 540 * k, y: 500 * k), radius: 380 * k, options: [])
+        // 星星（固定位置）
+        let stars: [(CGFloat, CGFloat, CGFloat)] = [(190, 780, 10), (300, 860, 6), (760, 830, 9), (850, 700, 6), (230, 300, 7),
+                                                    (820, 250, 10), (640, 860, 5), (150, 560, 5), (880, 470, 5), (420, 190, 6)]
+        for (x, y, r) in stars {
+            NSColor(srgbRed: 1, green: 0.93, blue: 0.75, alpha: 0.9).setFill()
+            if r >= 9 {   // 大星星画成十字
+                NSRect(x: (x - r * 1.6) * k, y: (y - r * 0.35) * k, width: r * 3.2 * k, height: r * 0.7 * k).fill()
+                NSRect(x: (x - r * 0.35) * k, y: (y - r * 1.6) * k, width: r * 0.7 * k, height: r * 3.2 * k).fill()
+            } else {
+                NSBezierPath(ovalIn: NSRect(x: (x - r / 2) * k, y: (y - r / 2) * k, width: r * k, height: r * k)).fill()
+            }
+        }
+        // 像素橘猫火箭：最近邻放大，保持像素格清晰
+        NSGraphicsContext.current?.imageInterpolation = .none
+        let sw: CGFloat = 36 * 21 * k, sh: CGFloat = 20 * 21 * k
+        let dst = NSRect(x: 512 * k - sw / 2, y: 505 * k - sh / 2, width: sw, height: sh)
+        NSGraphicsContext.saveGraphicsState()
+        let glow = NSShadow(); glow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        glow.shadowBlurRadius = 18 * k; glow.shadowOffset = NSSize(width: 0, height: -14 * k); glow.set()
+        sprite.draw(in: dst, from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])!
+    }
+    for (name, px) in [("16x16", 16), ("16x16@2x", 32), ("32x32", 32), ("32x32@2x", 64), ("128x128", 128), ("128x128@2x", 256),
+                       ("256x256", 256), ("256x256@2x", 512), ("512x512", 512), ("512x512@2x", 1024)] {
+        try! render(px).write(to: URL(fileURLWithPath: "\(dir)/icon_\(name).png"))
+    }
+    exit(0)
+}
+
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--preview" {
     let sc = 8.0, w = Runner.all.map { $0.size.width * CGFloat($0.frameCount) }.max()!
     let rowH = 22.0, rows = Double(Runner.all.count)
