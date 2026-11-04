@@ -21,16 +21,16 @@
 
 ## Features
 
-- **Runners** — a galloping cat and a steaming coffee cup, drawn in code as template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
+- **Runners** — a galloping cat, a steaming coffee cup and a rainbow cat (an original design: our cat flying with a waving rainbow trail and twinkling stars), drawn in code as template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
 - **Menu bar metrics with live mini graphs** — CPU, GPU, memory, battery, network, SoC or battery temperature. Choose *Graph + Number*, *Graph only* or *Number only*.
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
   - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version
   - CPU (System / User / Idle) and GPU history charts
   - Memory breakdown (App / Wired / Compressed)
-  - Storage ring, battery level, health and cycle count
+  - Storage ring, battery level, health, cycle count and estimated time left (or time until full)
   - Temperatures — SoC, battery, SSD
   - Network upload / download speed
-  - **Click any card for details** — per-core CPU and top apps by CPU, GPU utilization and top apps by GPU, memory by app, every temperature sensor, all volumes, full battery info (capacity, voltage, power, adapter), network interfaces and top apps by traffic, full machine spec
+  - **Click any card for details** (with smooth slide / fade transitions) — app disk usage largest-first, per-core CPU and top apps by CPU, GPU utilization and top apps by GPU, memory by app, every temperature sensor, all volumes, full battery info (capacity, voltage, power, adapter), network interfaces and top apps by traffic, full machine spec
 - **Settings** — refresh rate (0.5 s / 1 s / 2 s), °C / °F, English / 简体中文, launch at login, open Activity Monitor.
 
 ## Install

@@ -101,6 +101,37 @@ enum SystemInfo {
         }
     }
 
+    /// 续航估算：(标签, 时间文本)。放电 → 预计可用；充电 → 充满还需；接电源已充满 → 已接电源
+    static func batteryTime() -> (label: String, value: String)? {
+        guard let b = battery() else { return nil }
+        func fmt(_ minutes: Int) -> String {
+            minutes >= 60 ? L("\(minutes / 60) 小时 \(minutes % 60) 分", "\(minutes / 60)h \(minutes % 60)m") : L("\(minutes) 分钟", "\(minutes) min")
+        }
+        if b.state == "charging" {
+            var mins = -1
+            if let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+               let list = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef] {
+                for ps in list {
+                    if let d = IOPSGetPowerSourceDescription(blob, ps)?.takeUnretainedValue() as? [String: Any],
+                       let t = d[kIOPSTimeToFullChargeKey] as? Int { mins = t }
+                }
+            }
+            return (L("充满还需", "Until full"), mins > 0 ? fmt(mins) : L("计算中…", "Calculating…"))
+        }
+        if b.state == "ac" { return (L("续航", "Battery"), L("已接电源", "On AC power")) }
+        let est = IOPSGetTimeRemainingEstimate()        // 秒；-1 = 计算中，-2 = 接电源
+        if est > 0 { return (L("预计可用", "Time left"), fmt(Int(est / 60))) }
+        // 系统还在估算：用 当前容量 ÷ 放电电流 自己算一个
+        let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("AppleSmartBattery"))
+        defer { if svc != 0 { IOObjectRelease(svc) } }
+        func num(_ k: String) -> NSNumber? { IORegistryEntryCreateCFProperty(svc, k as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber }
+        let ma = Double(Int32(truncatingIfNeeded: num("InstantAmperage")?.int64Value ?? 0))
+        if let cap = num("AppleRawCurrentCapacity")?.doubleValue, ma < -50 {
+            return (L("预计可用", "Time left"), "≈ " + fmt(Int(cap / -ma * 60)))
+        }
+        return (L("预计可用", "Time left"), L("计算中…", "Calculating…"))
+    }
+
     static func gb(_ bytes: Double) -> String { String(format: "%.1f GB", bytes / 1_073_741_824) }
 }
 
@@ -186,6 +217,7 @@ struct Runner {
     let name: String
     let frameCount: Int
     let size: NSSize
+    var template = true                    // false = 彩色图（不随菜单栏变色）
     let draw: (_ t: Double) -> Void       // t: 0 ~ 2π
 
     var displayName: String { let p = name.split(separator: "|").map(String.init); return L(p[0], p.count > 1 ? p[1] : p[0]) }
@@ -197,12 +229,55 @@ struct Runner {
                 draw(Double(i) / Double(frameCount) * 2 * .pi)
                 return true
             }
-            img.isTemplate = true
+            img.isTemplate = template
             return img
         }
     }
 
-    static let all: [Runner] = [cat, coffee]
+    static let all: [Runner] = [cat, coffee, rainbow]
+
+    // 彩虹猫（原创）：我们自己的奔跑小猫在空中飞，身后拖着波浪彩虹，周围小星星闪烁
+    static let rainbow = Runner(id: "rainbow", name: "彩虹猫|Rainbow Cat", frameCount: 12, size: NSSize(width: 42, height: 18), template: false) { t in
+        let ctx = NSGraphicsContext.current!.cgContext
+        // 彩虹：6 条色带，分成 3pt 一段，段与段上下错开并随时间起伏
+        let colors: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemGreen, .systemBlue, .systemPurple]
+        let band: CGFloat = 1.5, top: CGFloat = 13.8, trailEnd: CGFloat = 19
+        var x: CGFloat = 0, seg = 0
+        while x < trailEnd {
+            let dy = CGFloat(sin(t * 2 - Double(seg) * 0.9)) * 0.8
+            for (i, c) in colors.enumerated() {
+                c.setFill()
+                NSRect(x: x, y: top - band * CGFloat(i + 1) + dy, width: 3.2, height: band).fill()
+            }
+            x += 3; seg += 1
+        }
+        // 小星星：四角星，按相位闪烁
+        func star(_ cx: CGFloat, _ cy: CGFloat, _ phase: Double) {
+            let a = CGFloat(max(0, sin(t + phase)))
+            guard a > 0.05 else { return }
+            NSColor.labelColor.withAlphaComponent(a).setFill()
+            let r = 0.6 + 1.2 * a
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: cx, y: cy + r)); p.line(to: NSPoint(x: cx + 0.4, y: cy + 0.4))
+            p.line(to: NSPoint(x: cx + r, y: cy)); p.line(to: NSPoint(x: cx + 0.4, y: cy - 0.4))
+            p.line(to: NSPoint(x: cx, y: cy - r)); p.line(to: NSPoint(x: cx - 0.4, y: cy - 0.4))
+            p.line(to: NSPoint(x: cx - r, y: cy)); p.line(to: NSPoint(x: cx - 0.4, y: cy + 0.4))
+            p.close(); p.fill()
+        }
+        star(4, 16, 0); star(11, 2.5, 2.1); star(16, 16.5, 4.2); star(1.5, 3, 3.3)
+        // 猫：复用奔跑小猫，画进透明图层后整体染成菜单栏文字色（深浅色都看得清）
+        ctx.saveGState()
+        ctx.translateBy(x: 12, y: 0)
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        NSColor.black.setFill(); NSColor.black.setStroke()
+        Runner.cat.draw(t)
+        NSGraphicsContext.current?.compositingOperation = .sourceAtop
+        NSColor.labelColor.setFill()
+        NSRect(x: -12, y: 0, width: 42, height: 18).fill()
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        ctx.endTransparencyLayer()
+        ctx.restoreGState()
+    }
 
     // 奔跑小猫
     static let cat = Runner(id: "cat", name: "猫|Cat", frameCount: 12, size: NSSize(width: 30, height: 18)) { t in
@@ -657,7 +732,7 @@ final class DetailProvider {
         case .gpu:     refreshGPU(dt)
         case .memory:  memApps = ProcessMemory.top(PanelController.procRows)
         case .temps:   sensors = TempMonitor.shared.readAll()
-        case .storage: refreshVolumes()
+        case .storage: refreshVolumes(); refreshAppSizes()
         case .network: refreshInterfaces(dt); refreshNetApps()
         default: break
         }
@@ -810,6 +885,43 @@ final class DetailProvider {
         netApps = []
     }
 
+    // 各应用占用的磁盘空间：后台用 du 计算，缓存 10 分钟
+    var appSizes: [AppStat] = []
+    var sizeScanning = false
+    private var sizeScanTime: CFTimeInterval = 0
+
+    private func refreshAppSizes() {
+        guard !sizeScanning, appSizes.isEmpty || CACurrentMediaTime() - sizeScanTime > 600 else { return }
+        sizeScanning = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let fm = FileManager.default
+            let dirs = ["/Applications", NSHomeDirectory() + "/Applications"]
+            let apps = dirs.flatMap { d in ((try? fm.contentsOfDirectory(atPath: d)) ?? []).filter { $0.hasSuffix(".app") }.map { d + "/" + $0 } }
+            var result: [AppStat] = []
+            if !apps.isEmpty {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/du")
+                p.arguments = ["-sk"] + apps
+                let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+                if (try? p.run()) != nil {
+                    let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                    p.waitUntilExit()
+                    for line in out.split(separator: "\n") {
+                        let parts = line.split(separator: "\t", maxSplits: 1)
+                        guard parts.count == 2, let kb = Double(parts[0]) else { continue }
+                        let path = String(parts[1])
+                        result.append(AppStat(name: ((path as NSString).lastPathComponent as NSString).deletingPathExtension,
+                                              path: path, value: kb * 1024, processes: 1))
+                    }
+                }
+            }
+            result.sort { $0.value > $1.value }
+            DispatchQueue.main.async {
+                self?.appSizes = Array(result.prefix(12)); self?.sizeScanning = false; self?.sizeScanTime = CACurrentMediaTime()
+            }
+        }
+    }
+
     private func refreshVolumes() {
         let keys: [URLResourceKey] = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
         let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
@@ -851,9 +963,7 @@ enum BatteryDetail {
         r.append((L("功率", "Power"), String(format: "%.1f W", mv * ma / 1_000_000)))
         if let t = TempMonitor.shared.read().battery { r.append((L("温度", "Temperature"), TempUnit.format(t))) }
         if let a = adapter, let w = a["Watts"] as? Int { r.append((L("电源适配器", "Power Adapter"), "\(w) W")) }
-        if let tr = int("TimeRemaining"), tr > 0, tr < 65535 {
-            r.append((L("剩余时间", "Time Remaining"), String(format: "%d:%02d", tr / 60, tr % 60)))
-        }
+        if let t = SystemInfo.batteryTime() { r.insert((t.label, t.value), at: min(2, r.count)) }
         return r
     }
 }
@@ -1034,12 +1144,33 @@ enum Draw {
 final class CardView: NSView {
     var drawer: (CGFloat) -> Void = { _ in }
     var onClick: (() -> Void)?
-    override func mouseUp(with event: NSEvent) { onClick?() }
+    private var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }
+    private var pressed = false { didSet { if pressed != oldValue { needsDisplay = true } } }
+    override func mouseDown(with event: NSEvent) { if onClick != nil { pressed = true } }
+    override func mouseUp(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        pressed = false
+        if inside { onClick?() }
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = onClick != nil }
+    override func mouseExited(with event: NSEvent) { hovered = false; pressed = false }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
     override func resetCursorRects() { if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) } }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var isFlipped: Bool { true }
     static var drawCount = 0
-    override func draw(_ dirtyRect: NSRect) { CardView.drawCount += 1; drawer(bounds.width) }
+    override func draw(_ dirtyRect: NSRect) {
+        CardView.drawCount += 1
+        if hovered || pressed {   // 悬停微亮，按下更亮
+            NSColor.labelColor.withAlphaComponent(pressed ? 0.12 : 0.05).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 18, yRadius: 18).fill()
+        }
+        drawer(bounds.width)
+    }
 }
 
 // MARK: - 液态玻璃面板（NSPopover 挂在菜单栏图标下，系统负责多屏 / 全屏 / 空间）
@@ -1109,7 +1240,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             (134, [(0, W, drawCPU, { [weak self] in self?.showDetail(.cpu) })]),
             (118, [(0, half, drawGPU, { [weak self] in self?.showDetail(.gpu) }), (half + g, half, drawTemps, { [weak self] in self?.showDetail(.temps) })]),
             (84,  [(0, W, drawMemory, { [weak self] in self?.showDetail(.memory) })]),
-            (118, [(0, half, drawStorage, { [weak self] in self?.showDetail(.storage) }), (half + g, half, drawBattery, { [weak self] in self?.showDetail(.battery) })]),
+            (138, [(0, half, drawStorage, { [weak self] in self?.showDetail(.storage) }), (half + g, half, drawBattery, { [weak self] in self?.showDetail(.battery) })]),
             (96,  [(0, W, drawNetwork, { [weak self] in self?.showDetail(.network) })]),
         ], button: { [weak self] card, w in
             guard let self else { return }
@@ -1121,8 +1252,13 @@ final class PanelController: NSObject, NSPopoverDelegate {
             card.addSubview(b)
         })
         cards = mainPage.cards
+        // host 容纳当前页面；页面贴顶（高度变化时随 popover 平滑伸缩）
+        host = NSView(frame: NSRect(origin: .zero, size: mainPage.size))
+        mainPage.view.autoresizingMask = [.minYMargin]
+        host.addSubview(mainPage.view)
+        current = mainPage.view
         let vc = NSViewController()
-        vc.view = mainPage.view
+        vc.view = host
         popover.contentViewController = vc
         popover.contentSize = mainPage.size
     }
@@ -1154,7 +1290,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
             case .gpu:     rows += [(4 * 24 + 46, [(0, W, drawGPUStats, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("占用 GPU 最多的应用", "Top apps by GPU"), self?.detail.gpuApps ?? [], { String(format: "%.1f%%", $0 * 100) }) }, nil)])]
             case .memory:  rows.append((CGFloat(Self.procRows) * 30 + 44, [(0, W, drawProcessList, nil)]))
             case .temps:   rows.append((CGFloat(max(1, min(14, (detail.sensors.count + 1) / 2))) * 22 + 24, [(0, W, drawSensors, nil)]))
-            case .storage: rows.append((CGFloat(max(1, detail.volumes.count)) * 46 + 14, [(0, W, drawVolumes, nil)]))
+            case .storage: rows += [(CGFloat(max(1, detail.volumes.count)) * 46 + 14, [(0, W, drawVolumes, nil)]),
+                                    (12 * 30 + 46, [(0, W, drawAppSizes, nil)])]
             case .network: rows += [(CGFloat(max(1, detail.interfaces.count)) * 40 + 40, [(0, W, drawInterfaces, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("网络流量最大的应用", "Top apps by network"), self?.detail.netApps ?? [], { NetMonitor.format($0) }) }, nil)])]
             }
             let p = makePage(rows, button: { [weak self] card, _ in
@@ -1189,7 +1326,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
     @objc private func backToMain() {
         detailTimer?.invalidate(); detailTimer = nil
         detail.stopNetwork()
-        switchTo(mainPage)
+        switchTo(mainPage, forward: false, animated: popover.isShown)
     }
 
     private var detailTitle: (icon: String, tint: NSColor, title: String, value: String, sub: String) {
@@ -1291,6 +1428,17 @@ final class PanelController: NSObject, NSPopoverDelegate {
         }
     }
 
+    private func drawAppSizes(_ w: CGFloat) {
+        let apps = detail.appSizes
+        if apps.isEmpty {
+            sectionTitle(L("应用占用空间", "Space used by apps"))
+            Draw.text(detail.sizeScanning ? L("正在计算应用大小…", "Calculating app sizes…") : "", NSPoint(x: 14, y: 40), size: 11, color: .glassTertiary)
+            return
+        }
+        // drawApps 会画标题；“×1” 不显示
+        drawApps(w, L("应用占用空间（从大到小）", "Space used by apps (largest first)"), apps, { ProcessMemory.format(UInt64($0)) })
+    }
+
     private func drawVolumes(_ w: CGFloat) {
         var y: CGFloat = 12
         for v in detail.volumes {
@@ -1316,11 +1464,36 @@ final class PanelController: NSObject, NSPopoverDelegate {
         }
     }
 
-    private func switchTo(_ page: Page) {
-        popover.contentViewController?.view = page.view
-        popover.contentSize = page.size
+    private var host: NSView!
+    private var current: NSView?
+
+    /// 切换页面：新页从一侧滑入并淡入，旧页向另一侧滑出并淡出；popover 高度同步平滑变化
+    private func switchTo(_ page: Page, forward: Bool = true, animated: Bool = true) {
         cards = page.cards
-        cards.forEach { $0.window?.invalidateCursorRects(for: $0) }
+        guard let old = current, old !== page.view else { return }
+        let dx: CGFloat = 36
+        // popover 不会自动改 host 的尺寸：手动设为新页面大小，新旧页面都按顶部对齐
+        host.setFrameSize(page.size)
+        old.setFrameOrigin(NSPoint(x: 0, y: page.size.height - old.frame.height))
+        page.view.setFrameOrigin(NSPoint(x: animated ? (forward ? dx : -dx) : 0, y: 0))
+        page.view.alphaValue = animated ? 0 : 1
+        host.addSubview(page.view)
+        current = page.view
+        popover.contentSize = page.size
+        let finish = {
+            old.removeFromSuperview(); old.alphaValue = 1; old.setFrameOrigin(.zero)
+            page.view.window?.invalidateCursorRects(for: page.view)
+        }
+        guard animated, !CommandLine.arguments.contains("--no-anim") else { finish(); return }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.34
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)   // 快出慢收
+            ctx.allowsImplicitAnimation = true
+            page.view.animator().alphaValue = 1
+            page.view.animator().setFrameOrigin(NSPoint(x: 0, y: page.view.frame.minY))
+            old.animator().alphaValue = 0
+            old.animator().setFrameOrigin(NSPoint(x: forward ? -dx : dx, y: old.frame.minY))
+        }, completionHandler: finish)
     }
 
     private func drawProcessList(_ w: CGFloat) {
@@ -1374,7 +1547,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private func frame() {
         frameCount += 1
         if CommandLine.arguments.contains("--open-panel"), frameCount % 60 == 0 {
-            NSLog("panel debug: frames=%d draws=%d shown=%d", frameCount, CardView.drawCount, popover.isShown ? 1 : 0)
+            NSLog("panel debug: frames=%d cards=%d host=%@ content=%@ win=%@ subviews=%d", frameCount, cards.count,
+                  NSStringFromSize(host.frame.size), NSStringFromSize(popover.contentSize),
+                  NSStringFromSize(host.window?.frame.size ?? .zero), host.subviews.count)
         }
         let now = CACurrentMediaTime()
         model.tick(dt: now - lastTick); lastTick = now
@@ -1462,7 +1637,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         Draw.title("internaldrive", L("存储", "Storage"), in: w, tint: .systemIndigo)
         guard let st = m.storage else { return }
         let f = m.v("disk")
-        let center = NSPoint(x: 44, y: 76), r: CGFloat = 26
+        let center = NSPoint(x: 44, y: 84), r: CGFloat = 26
         let ring = NSBezierPath(); ring.lineWidth = 8
         ring.appendArc(withCenter: center, radius: r, startAngle: 0, endAngle: 360)
         NSColor.labelColor.withAlphaComponent(0.16).setStroke(); ring.stroke()
@@ -1471,11 +1646,14 @@ final class PanelController: NSObject, NSPopoverDelegate {
         Draw.level(f).setStroke(); arc.stroke()
         let s = NSAttributedString(string: Draw.pct(f), attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.labelColor])
         s.draw(at: NSPoint(x: center.x - s.size().width / 2, y: center.y - s.size().height / 2))
-        Draw.text(L("已用", "Used"), NSPoint(x: 84, y: 50), size: 10, color: .glassSecondary)
-        Draw.text(SystemInfo.gb(st.used), NSPoint(x: 84, y: 63), size: 11, weight: .medium, mono: true)
-        Draw.text(L("可用", "Free"), NSPoint(x: 84, y: 80), size: 10, color: .glassSecondary)
-        Draw.text(SystemInfo.gb(st.total - st.used), NSPoint(x: 84, y: 93), size: 11, weight: .medium, mono: true)
+        Draw.text(L("已用", "Used"), NSPoint(x: 84, y: 58), size: 10, color: .glassSecondary)
+        Draw.text(SystemInfo.gb(st.used), NSPoint(x: 84, y: 71), size: 11, weight: .medium, mono: true)
+        Draw.text(L("可用", "Free"), NSPoint(x: 84, y: 88), size: 10, color: .glassSecondary)
+        Draw.text(SystemInfo.gb(st.total - st.used), NSPoint(x: 84, y: 101), size: 11, weight: .medium, mono: true)
     }
+
+    private var batteryTime: (label: String, value: String)?
+    func updateBatteryTime() { batteryTime = SystemInfo.batteryTime() }
 
     private func drawBattery(_ w: CGFloat) {
         let m = model
@@ -1507,6 +1685,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
             Draw.bar(NSRect(x: 14, y: 87, width: w - 28, height: 4), m.v("health"), m.v("health") >= 0.8 ? .systemGreen : (m.v("health") >= 0.6 ? .systemYellow : .systemRed))
             Draw.text(L("循环次数", "Cycles"), NSPoint(x: 14, y: 96), size: 10, color: .glassSecondary)
             Draw.text("\(h.cycles) / \(h.designCycles)", NSPoint(x: w - 14, y: 95), size: 11, weight: .medium, right: true, mono: true)
+        }
+        if let t = batteryTime {
+            Draw.text(t.label, NSPoint(x: 14, y: 116), size: 10, color: .glassSecondary)
+            Draw.text(t.value, NSPoint(x: w - 14, y: 115), size: 11, weight: .medium, right: true)
         }
     }
 
@@ -1745,6 +1927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:       usage = l.total
         }
         let bat = SystemInfo.battery()
+        panel.updateBatteryTime()
         model.update(cpu: l, gpu: g, memory: m, storage: SystemInfo.storage(), battery: bat,
                      health: SystemInfo.batteryHealth(), temps: t, net: n)
         let pct = Draw.pct
