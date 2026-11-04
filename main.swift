@@ -234,7 +234,51 @@ struct Runner {
         }
     }
 
-    static let all: [Runner] = [cat, coffee, rainbow]
+    static let all: [Runner] = [cat, coffee, rainbow, pixelCat]
+
+    // 像素猫（原创像素格）：单色胖像素猫 + 深浅交替的像素条纹尾迹，模板图随菜单栏变色
+    static let pixelCat = Runner(id: "pixel", name: "像素猫|Pixel Cat", frameCount: 6, size: NSSize(width: 34, height: 16)) { t in
+        let ctx = NSGraphicsContext.current!.cgContext
+        ctx.setShouldAntialias(false)
+        let f = Int((t / (2 * .pi) * 6).rounded()) % 6
+        func px(_ x: Int, _ y: Int, _ a: CGFloat = 1) {          // y 从上往下数（0 = 顶）
+            NSColor.black.withAlphaComponent(a).setFill()
+            NSRect(x: x, y: 15 - y, width: 1, height: 1).fill()
+        }
+        let bob = f % 2                                          // 身体一上一下
+
+        // 尾迹：6 条深浅交替的条纹，每 4 格一段，段与段错开 1 格、随帧跳动
+        let stripeAlpha: [CGFloat] = [1, 0.5, 1, 0.5, 1, 0.5]
+        for seg in 0..<4 {
+            let dy = (seg + f) % 2
+            for (row, a) in stripeAlpha.enumerated() {
+                for x in (seg * 4)..<(seg * 4 + 4) { px(x, 4 + row + dy + bob, a) }
+            }
+        }
+
+        // 猫（18 × 11 像素格，面朝右）；# 实心，. 空（眼睛是空出来的格子）
+        let body = [
+            "...........#....#",
+            "...........##..##",
+            "...........######",
+            "...........#.##.#",
+            "..###############",
+            ".################",
+            ".###############.",
+            ".##############..",
+            "..############...",
+        ]
+        let ox = 15, oy = 2 + bob
+        for (r, line) in body.enumerated() {
+            for (c, ch) in line.enumerated() where ch == "#" { px(ox + c, oy + r) }
+        }
+        // 尾巴：从屁股翘起，随帧上下摆
+        let tailUp = f % 3 == 0
+        px(ox + 1, oy + 3); px(ox, oy + (tailUp ? 2 : 3)); px(ox - 1, oy + (tailUp ? 1 : 3))
+        // 腿：两组交替迈步
+        let legs = f % 2 == 0 ? [2, 5, 9, 12] : [3, 6, 10, 13]
+        for c in legs { px(ox + c, oy + 9); px(ox + c + (f % 2 == 0 ? -1 : 1), oy + 10) }
+    }
 
     // 彩虹猫（原创）：我们自己的奔跑小猫在空中飞，身后拖着波浪彩虹，周围小星星闪烁
     static let rainbow = Runner(id: "rainbow", name: "彩虹猫|Rainbow Cat", frameCount: 12, size: NSSize(width: 42, height: 18), template: false) { t in
