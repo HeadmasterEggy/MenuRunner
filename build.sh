@@ -13,7 +13,7 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>CFBundleIdentifier</key><string>local.joey.menurunner</string>
   <key>CFBundleExecutable</key><string>MenuRunner</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.4</string>
+  <key>CFBundleShortVersionString</key><string>1.5</string>
   <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
 </dict></plist>
