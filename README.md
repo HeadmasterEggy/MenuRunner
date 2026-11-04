@@ -1,58 +1,62 @@
+<div align="center">
+
 # MenuRunner
 
-A tiny macOS menu bar app: an animated runner that speeds up with your CPU, plus a Liquid Glass system monitor panel.
+**A tiny macOS menu bar runner + Liquid Glass system monitor**
 
-一个 macOS 菜单栏小工具：菜单栏里有一个会跑的小角色，CPU 越忙跑得越快；点开是一块液态玻璃风格的系统监控面板。
+[![English](https://img.shields.io/badge/Language-English-0A84FF?style=for-the-badge)](README.md)
+[![简体中文](https://img.shields.io/badge/语言-简体中文-E5484D?style=for-the-badge)](README.zh-CN.md)
 
-<p>
-  <img src="docs/panel.png" width="320" alt="Panel">
-  <img src="docs/settings.png" width="210" alt="Settings">
-</p>
+[![Release](https://img.shields.io/github/v/release/HeadmasterEggy/MenuRunner?style=flat-square)](https://github.com/HeadmasterEggy/MenuRunner/releases/latest)
+![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple)
+![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-555?style=flat-square)
 
-![Runners](docs/runners.png)
+<img src="docs/panel.png" width="320" alt="Panel">&nbsp;&nbsp;<img src="docs/settings.png" width="210" alt="Settings">
 
-## Features / 功能
+<img src="docs/runners.png" alt="Runners">
 
-- **Runners**: a galloping cat and a steaming coffee cup, drawn in code as template images (adapts to light/dark menu bar). Speed follows CPU, GPU or memory usage.
-  **Runner**：奔跑的猫、冒热气的咖啡，代码绘制的模板图，自动适配深浅色菜单栏；速度可跟随 CPU / GPU / 内存。
-- **Menu bar metrics** with live mini graphs: CPU, GPU, memory, battery, network, SoC / battery temperature.
-  **菜单栏指标**带动态小图：CPU、GPU、内存、电池、网络、芯片 / 电池温度。
+</div>
+
+## Features
+
+- **Runners** — a galloping cat and a steaming coffee cup, drawn in code as template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
+- **Menu bar metrics with live mini graphs** — CPU, GPU, memory, battery, network, SoC or battery temperature. Choose *Graph + Number*, *Graph only* or *Number only*.
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
-  **液态玻璃面板**，60fps 动画：
-  - Machine spec: model, chip, CPU/GPU cores, memory, disk, macOS version / 本机配置
-  - CPU (System / User / Idle) and GPU history charts / CPU、GPU 历史曲线
-  - Memory breakdown (App / Wired / Compressed) / 内存细分
-  - Storage ring, battery level, health and cycle count / 存储环形图、电量、健康度、循环次数
-  - Temperatures: SoC, battery, SSD / 温度：芯片、电池、SSD
-  - Network upload / download speed / 网络上传下载速度
-- Settings: refresh rate (0.5s / 1s / 2s), °C / °F, 中文 / English, launch at login, open Activity Monitor.
-  设置：刷新频率、温度单位、中英文切换、开机自动启动、打开活动监视器。
+  - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version
+  - CPU (System / User / Idle) and GPU history charts
+  - Memory breakdown (App / Wired / Compressed)
+  - Storage ring, battery level, health and cycle count
+  - Temperatures — SoC, battery, SSD
+  - Network upload / download speed
+- **Settings** — refresh rate (0.5 s / 1 s / 2 s), °C / °F, English / 简体中文, launch at login, open Activity Monitor.
 
-## Requirements / 环境
+## Install
 
-- macOS 26 or later (Liquid Glass APIs), Apple Silicon
-- Xcode Command Line Tools (`swiftc`)
+1. Download `MenuRunner-x.y.dmg` from [Releases](https://github.com/HeadmasterEggy/MenuRunner/releases/latest).
+2. Open the DMG and drag **MenuRunner** into **Applications**.
+3. The app is not notarized, so macOS blocks it on first launch. Either:
+   - open **System Settings → Privacy & Security** and click **Open Anyway**, or
+   - run `xattr -dr com.apple.quarantine /Applications/MenuRunner.app`
 
-## Build / 构建
+Left-click the menu bar icon to open the panel; right-click it (or use the gear button) for settings.
+
+## Build from source
+
+Requires macOS 26+ on Apple Silicon and the Xcode Command Line Tools.
 
 ```sh
-./build.sh
+./build.sh      # compile, ad-hoc sign, install to ~/Applications
+./make_dmg.sh   # build dist/MenuRunner-<version>.dmg
 ```
 
-This compiles `main.swift` into `MenuRunner.app`, signs it ad-hoc, and installs it to `~/Applications`.
-Then open `~/Applications/MenuRunner.app`. Left-click the menu bar icon for the panel, right-click (or the gear button) for settings.
-
-会编译出 `MenuRunner.app`，做本地签名并安装到 `~/Applications`。左键点菜单栏图标打开面板，右键（或面板里的齿轮）打开设置。
-
-Debug helpers / 调试命令:
+Debug helpers:
 
 ```sh
 MenuRunner.app/Contents/MacOS/MenuRunner --stats            # print all readings
 MenuRunner.app/Contents/MacOS/MenuRunner --preview out.png  # export runner frames
 ```
 
-## Notes / 说明
+## Notes
 
-- SoC / SSD temperatures are read from the system HID temperature sensors through a private IOKit API (the same approach Stats / iStat use). No root needed, but it may change in future macOS versions — the panel shows `--` if unavailable.
-  芯片 / SSD 温度通过 IOKit 私有接口读取系统温度传感器，无需管理员权限，但未来 macOS 版本可能变化，读不到时显示 `--`。
-- CPU / GPU / memory / battery / disk / network use public APIs (`host_statistics`, IORegistry, `getifaddrs`, IOKit power sources).
+- SoC / SSD temperatures come from the system HID temperature sensors through a private IOKit API (the same approach Stats and iStat use). No root needed, but future macOS versions may change it; the panel shows `--` when unavailable.
+- Everything else uses public APIs: `host_statistics`, IORegistry, `getifaddrs` and IOKit power sources.

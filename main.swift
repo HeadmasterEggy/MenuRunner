@@ -204,66 +204,95 @@ struct Runner {
     static let all: [Runner] = [cat, coffee]
 
     // 奔跑小猫
-    static let cat = Runner(id: "cat", name: "猫|Cat", frameCount: 12, size: NSSize(width: 28, height: 18)) { t in
-        // 奔跑周期：s = +1 身体完全舒展（腾空），s = -1 四腿收拢、拱背
+    static let cat = Runner(id: "cat", name: "猫|Cat", frameCount: 12, size: NSSize(width: 30, height: 18)) { t in
+        // 奔跑周期：s = +1 舒展腾空，s = -1 四腿收拢、拱背
         let s = sin(t), c = cos(t)
-        let lift = 0.5 + 0.5 * s                            // 舒展时离地更高
-        let shoulder = NSPoint(x: 18.3 + s * 0.7, y: 7.6 + lift - c * 0.5)
-        let hip      = NSPoint(x: 9.3 - s * 0.7,  y: 7.8 + lift + c * 0.5)
-        let arch = (1 - s) * 1.3                            // 收拢时拱背
+        let lift = 0.5 + 0.5 * s
+        let hip      = NSPoint(x: 10.0 - s * 0.9, y: 8.4 + lift + c * 0.4)
+        let shoulder = NSPoint(x: 19.6 + s * 0.9, y: 8.6 + lift - c * 0.4)
+        let arch = (1 - s) * 1.1
 
-        // 腿：大腿 + 小腿 + 爪，dir 决定膝盖朝向
-        func leg(_ root: NSPoint, _ angle: Double, knee bend: Double, width: CGFloat) {
-            let a1 = angle, a2 = angle + bend
-            let k = NSPoint(x: root.x + sin(a1) * 3.4, y: root.y - cos(a1) * 3.4)
-            var f = NSPoint(x: k.x + sin(a2) * 3.2, y: k.y - cos(a2) * 3.2)
-            f.y = max(0.9, f.y)
-            strokeLine([root, k, f], width)
+        // 粗细渐变的线（腿、尾巴）：沿折线逐段变细，圆头相接
+        func tapered(_ pts: [NSPoint], _ widths: [CGFloat]) {
+            for i in 0..<(pts.count - 1) {
+                let p = NSBezierPath()
+                p.lineCapStyle = .round
+                p.lineWidth = widths[i]
+                p.move(to: pts[i]); p.line(to: pts[i + 1]); p.stroke()
+            }
         }
-        // 前腿：舒展时向前伸，收拢时向后收，膝盖向后弯
-        func frontAngle(_ p: Double) -> Double { sin(p) * 0.6 + 0.25 }
-        func backAngle(_ p: Double) -> Double { -sin(p) * 0.6 - 0.25 }
-        let fa = frontAngle(t), fb = frontAngle(t - 0.6)
-        let ba = backAngle(t), bb = backAngle(t - 0.6)
-        // 远侧的腿细一点，制造前后层次
-        leg(NSPoint(x: shoulder.x - 1, y: shoulder.y), fb, knee: -0.5 * (1 - sin(t - 0.6)) * 0.6 - 0.1, width: 1.3)
-        leg(NSPoint(x: hip.x + 1, y: hip.y), bb, knee: 0.5 + 0.3 * sin(t - 0.6), width: 1.3)
+        // 腿：大腿粗 → 小腿细 → 小爪
+        func leg(_ root: NSPoint, thigh a1: Double, shin a2: Double, len: (Double, Double), w: CGFloat, far: Bool) {
+            let k = NSPoint(x: root.x + sin(a1) * len.0, y: root.y - cos(a1) * len.0)
+            var f = NSPoint(x: k.x + sin(a2) * len.1, y: k.y - cos(a2) * len.1)
+            f.y = max(1.0, f.y)
+            NSColor.black.withAlphaComponent(far ? 0.55 : 1).setStroke()
+            NSColor.black.withAlphaComponent(far ? 0.55 : 1).setFill()
+            tapered([root, k, f], [w, w * 0.62])
+            NSBezierPath(ovalIn: NSRect(x: f.x - 1.1, y: f.y - 0.9, width: 2.4, height: 1.6)).fill()   // 爪
+            NSColor.black.setStroke(); NSColor.black.setFill()
+        }
+        // 前腿：肩部向前伸 / 向后收，肘在下，腕部略向后折
+        func front(_ p: Double) -> (Double, Double) { let a = 0.2 + sin(p) * 0.65; return (a, a - 0.25 - 0.35 * max(0, -sin(p))) }
+        // 后腿：大腿向前收 / 向后蹬，跗关节向后折（猫腿特征）
+        func back(_ p: Double) -> (Double, Double) { let a = -0.15 - sin(p) * 0.6; return (a + 0.35, a - 0.45) }
 
-        // 身体：沿脊柱的粗曲线，可伸缩可拱背
-        let spine = NSBezierPath()
-        spine.lineWidth = 6.2; spine.lineCapStyle = .round
-        spine.move(to: hip)
-        spine.curve(to: shoulder,
-                    controlPoint1: NSPoint(x: hip.x + 3, y: hip.y + arch),
-                    controlPoint2: NSPoint(x: shoulder.x - 3, y: shoulder.y + arch))
-        spine.stroke()
+        // 远侧两条腿（半透明，做出前后层次）
+        let ff = front(t - 0.7), bf = back(t - 0.7)
+        let cg = NSGraphicsContext.current!.cgContext
+        cg.setAlpha(0.5)
+        cg.beginTransparencyLayer(auxiliaryInfo: nil)
+        leg(NSPoint(x: shoulder.x - 0.6, y: shoulder.y - 0.6), thigh: ff.0, shin: ff.1, len: (3.9, 3.6), w: 2.0, far: false)
+        leg(NSPoint(x: hip.x + 0.4, y: hip.y - 0.4), thigh: bf.0, shin: bf.1, len: (3.7, 4.0), w: 2.6, far: false)
+        cg.endTransparencyLayer()
+        cg.setAlpha(1)
 
-        // 近侧的腿
-        leg(shoulder, fa, knee: -0.5 * (1 - s) * 0.6 - 0.1, width: 1.6)
-        leg(hip, ba, knee: 0.5 + 0.3 * s, width: 1.6)
+        // 尾巴：根部粗、尾尖细，S 形甩动
+        var tail: [NSPoint] = []
+        let tb = NSPoint(x: hip.x - 2.6, y: hip.y + 1.6)
+        for i in 0...6 {
+            let u = Double(i) / 6
+            tail.append(NSPoint(x: tb.x - u * 6.2,
+                                y: tb.y + u * 2.6 + sin(t - u * 2.2) * 1.5 * u))
+        }
+        tapered(tail, [2.0, 1.8, 1.6, 1.4, 1.2, 1.0])
 
-        // 头：跟着肩膀走，落地时轻轻点头
-        let hc = NSPoint(x: shoulder.x + 3.4, y: shoulder.y + 2.6 + c * 0.35)
-        NSBezierPath(ovalIn: NSRect(x: hc.x - 3.3, y: hc.y - 2.9, width: 6.6, height: 5.8)).fill()
-        // 吻部
-        NSBezierPath(ovalIn: NSRect(x: hc.x + 1.4, y: hc.y - 2.2, width: 3.0, height: 2.4)).fill()
-        // 耳朵（略向后倒，有奔跑感）
+        // 身体：臀部 + 胸腔两团，中间收腰；背部可拱起
+        NSBezierPath(ovalIn: NSRect(x: hip.x - 3.6, y: hip.y - 3.0, width: 7.0, height: 6.4)).fill()
+        NSBezierPath(ovalIn: NSRect(x: shoulder.x - 3.4, y: shoulder.y - 3.2, width: 7.0, height: 6.8)).fill()
+        let torso = NSBezierPath()
+        torso.move(to: NSPoint(x: hip.x, y: hip.y + 3.1))
+        torso.curve(to: NSPoint(x: shoulder.x, y: shoulder.y + 3.3),
+                    controlPoint1: NSPoint(x: hip.x + 3, y: hip.y + 3.3 + arch),
+                    controlPoint2: NSPoint(x: shoulder.x - 3, y: shoulder.y + 3.4 + arch))
+        torso.line(to: NSPoint(x: shoulder.x, y: shoulder.y - 2.6))
+        torso.curve(to: NSPoint(x: hip.x, y: hip.y - 2.2),                       // 腹部微微上收
+                    controlPoint1: NSPoint(x: shoulder.x - 3, y: shoulder.y - 1.6 + arch * 0.5),
+                    controlPoint2: NSPoint(x: hip.x + 3, y: hip.y - 1.4 + arch * 0.5))
+        torso.close(); torso.fill()
+
+        // 头：圆脑袋 + 吻部 + 竖起的耳朵，跟着肩膀点头
+        let hc = NSPoint(x: shoulder.x + 4.4, y: shoulder.y + 3.0 + c * 0.3)
+        let neck = NSBezierPath()
+        neck.lineWidth = 4.2; neck.lineCapStyle = .round
+        neck.move(to: NSPoint(x: shoulder.x + 1, y: shoulder.y + 1)); neck.line(to: hc); neck.stroke()
+        NSBezierPath(ovalIn: NSRect(x: hc.x - 3.0, y: hc.y - 2.6, width: 6.0, height: 5.4)).fill()
+        NSBezierPath(ovalIn: NSRect(x: hc.x + 1.2, y: hc.y - 2.3, width: 3.4, height: 2.8)).fill()     // 吻部
         let ears = NSBezierPath()
-        ears.move(to: NSPoint(x: hc.x - 2.8, y: hc.y + 1.4)); ears.line(to: NSPoint(x: hc.x - 2.6, y: hc.y + 5.1)); ears.line(to: NSPoint(x: hc.x - 0.2, y: hc.y + 2.6))
-        ears.move(to: NSPoint(x: hc.x + 0.2, y: hc.y + 2.7)); ears.line(to: NSPoint(x: hc.x + 1.4, y: hc.y + 5.3)); ears.line(to: NSPoint(x: hc.x + 2.9, y: hc.y + 1.3))
+        ears.move(to: NSPoint(x: hc.x - 2.5, y: hc.y + 1.5)); ears.line(to: NSPoint(x: hc.x - 2.0, y: hc.y + 5.0)); ears.line(to: NSPoint(x: hc.x - 0.1, y: hc.y + 2.6))
+        ears.move(to: NSPoint(x: hc.x + 0.5, y: hc.y + 2.7)); ears.line(to: NSPoint(x: hc.x + 1.9, y: hc.y + 5.2)); ears.line(to: NSPoint(x: hc.x + 2.9, y: hc.y + 1.6))
         ears.close(); ears.fill()
-        // 眼睛
-        punch { NSBezierPath(ovalIn: NSRect(x: hc.x + 0.8, y: hc.y + 0.1, width: 1.5, height: 1.8)).fill() }
+        punch {
+            NSBezierPath(ovalIn: NSRect(x: hc.x + 0.9, y: hc.y + 0.3, width: 1.3, height: 1.6)).fill()   // 眼睛
+            let ear = NSBezierPath()   // 耳朵内侧
+            ear.move(to: NSPoint(x: hc.x + 1.1, y: hc.y + 2.9)); ear.line(to: NSPoint(x: hc.x + 1.8, y: hc.y + 4.2)); ear.line(to: NSPoint(x: hc.x + 2.3, y: hc.y + 2.6))
+            ear.close(); ear.fill()
+        }
 
-        // 尾巴：从臀部甩出的 S 形，波浪沿尾巴传递
-        let tail = NSBezierPath()
-        tail.lineWidth = 1.5; tail.lineCapStyle = .round
-        let tb = NSPoint(x: hip.x - 2.2, y: hip.y + 1.2)
-        tail.move(to: tb)
-        tail.curve(to: NSPoint(x: tb.x - 5.6, y: tb.y + 3.2 + sin(t - 1.6) * 1.6),
-                   controlPoint1: NSPoint(x: tb.x - 2.2, y: tb.y + 0.6 + sin(t - 0.6) * 1.4),
-                   controlPoint2: NSPoint(x: tb.x - 3.8, y: tb.y + 1.4 + sin(t - 1.1) * 1.8))
-        tail.stroke()
+        // 近侧两条腿
+        let fn = front(t), bn = back(t)
+        leg(shoulder, thigh: fn.0, shin: fn.1, len: (3.9, 3.6), w: 2.2, far: false)
+        leg(NSPoint(x: hip.x - 0.4, y: hip.y), thigh: bn.0, shin: bn.1, len: (3.7, 4.0), w: 3.0, far: false)
     }
 
     // 一杯咖啡：圆润杯子 + 细节（杯沿、液面、高光），热气从整个杯口升起、往上收细变淡
