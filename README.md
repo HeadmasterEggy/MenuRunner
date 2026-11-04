@@ -15,7 +15,7 @@
 
 <img src="docs/panel.png" width="260" alt="Panel">&nbsp;&nbsp;<img src="docs/cpu.png" width="260" alt="CPU details">&nbsp;&nbsp;<img src="docs/memory.png" width="260" alt="Memory usage by app">
 
-<img src="docs/settings.png" width="200" alt="Settings">
+<img src="docs/settings.png" width="260" alt="Settings">
 
 <img src="docs/rocket.png" width="640" alt="Rocket Cat">
 

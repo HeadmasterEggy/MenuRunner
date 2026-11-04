@@ -1544,6 +1544,45 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private var kvRows: [(String, String)] = []
 
     func debugShow(_ k: DetailKind) { showDetail(k) }
+
+    // MARK: 设置页：和详情页一样从右边滑入
+    var settingsModel: SettingsModel?
+    private var settingsPage: Page?
+
+    func showSettings() {
+        guard let m = settingsModel else { return }
+        let page = settingsPage ?? {
+            let W = Self.width, M = Self.margin, g = Self.gap
+            let header = makePage([(56, [(0, W, { [weak self] w in self?.drawSettingsHeader(w) }, nil)])], button: { [weak self] card, _ in
+                guard let self else { return }
+                let b = NSButton(image: NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
+                                 target: self, action: #selector(self.backToMain))
+                b.isBordered = false
+                b.contentTintColor = .labelColor
+                b.frame = NSRect(x: 10, y: 16, width: 24, height: 24)
+                card.addSubview(b)
+            })
+            let formH: CGFloat = 600
+            let size = NSSize(width: header.size.width, height: header.size.height + g + formH)
+            let root = NSView(frame: NSRect(origin: .zero, size: size))
+            header.view.setFrameOrigin(NSPoint(x: 0, y: size.height - header.size.height))
+            root.addSubview(header.view)
+            let host = NSHostingView(rootView: SettingsView(m: m, width: W + M * 2 - 8, height: formH))
+            host.frame = NSRect(x: 4, y: 0, width: W + M * 2 - 8, height: formH)
+            root.addSubview(host)
+            let p = Page(view: root, size: size, cards: header.cards)
+            settingsPage = p
+            return p
+        }()
+        switchTo(page)
+    }
+
+    private func drawSettingsHeader(_ w: CGFloat) {
+        Draw.symbol("gearshape.fill", NSPoint(x: 40, y: 10), size: 15, color: .glassSecondary)
+        Draw.text(L("设置", "Settings"), NSPoint(x: 64, y: 8), size: 13, weight: .semibold)
+        Draw.text("MenuRunner " + (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""),
+                  NSPoint(x: 64, y: 29), size: 10, color: .glassSecondary)
+    }
     var debugMainView: NSView { mainPage.view }
     var debugCardFrames: [NSRect] { mainPage.cards.map { $0.frame } }
 
@@ -2130,6 +2169,8 @@ struct RunnerCard: View {
 
 struct SettingsView: View {
     @ObservedObject var m: SettingsModel
+    var width: CGFloat = 540
+    var height: CGFloat = 770
 
     private func menuPicker(_ key: String, _ title: String, _ icon: String) -> some View {
         Picker(selection: m.binding(key)) {
@@ -2151,15 +2192,14 @@ struct SettingsView: View {
             Section(L("外观", "Appearance")) {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("Runner", systemImage: "figure.run")
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(Runner.all, id: \.id) { r in
-                                RunnerCard(runner: r, frames: m.runnerFrames[r.id] ?? [], selected: m.values["runner"] == r.id)
-                                    .onTapGesture { withAnimation(.snappy) { m.binding("runner").wrappedValue = r.id } }
-                            }
+                    // 自动换行：面板里一行 3 张，宽窗口里一行 5 张
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 84, maximum: 96), spacing: 8)], spacing: 8) {
+                        ForEach(Runner.all, id: \.id) { r in
+                            RunnerCard(runner: r, frames: m.runnerFrames[r.id] ?? [], selected: m.values["runner"] == r.id)
+                                .onTapGesture { withAnimation(.snappy) { m.binding("runner").wrappedValue = r.id } }
                         }
-                        .padding(.vertical, 2)
                     }
+                    .padding(.vertical, 2)
                 }
                 menuPicker("barMetric", L("菜单栏显示", "Menu Bar Shows"), "menubar.rectangle")
                 menuPicker("barStyle", L("菜单栏样式", "Menu Bar Style"), "chart.xyaxis.line")
@@ -2189,7 +2229,8 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 540, height: 770)
+        .scrollContentBackground(.hidden)          // 透出面板的液态玻璃
+        .frame(width: width, height: height)
     }
 }
 
@@ -2400,7 +2441,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "lang":
             Lang.mode = id; buildSettingsMenu(); panel.redrawAll(); sample()
             settingsModel.langTick += 1
-            settingsWindow?.title = L("MenuRunner 设置", "MenuRunner Settings")
         default: break
         }
     }
@@ -2443,7 +2483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "barMetric": return Self.barOptions.map { ($0.0, $0.1) }
             case "barStyle": return Self.styleOptions.map { ($0.0, $0.1) }
             case "speedSource": return [("cpu", "CPU"), ("gpu", "GPU"), ("memory", L("内存", "Memory"))]
-            case "refreshInterval": return [("0.5", L("实时 0.5 秒", "Real-time 0.5s")), ("1.0", L("标准 1 秒", "Standard 1s")), ("2.0", L("省电 2 秒", "Saver 2s"))]
+            case "refreshInterval": return [("0.5", L("0.5 秒", "0.5s")), ("1.0", L("1 秒", "1s")), ("2.0", L("2 秒", "2s"))]   // 面板窄，用短名
             case "tempUnit": return [("C", "°C"), ("F", "°F")]
             case "lang": return Self.langOptions.map { ($0.0, $0.1) }
             default: return []
@@ -2459,22 +2499,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.openActivityMonitor = { [weak self] in self?.openActivityMonitor() }
         return m
     }()
-    private var settingsWindow: NSWindow?
-
+    /// 打开面板并滑到设置页
     @objc private func showSettings() {
-        panel.hide()
-        if settingsWindow == nil {
-            let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(m: settingsModel)))
-            w.title = L("MenuRunner 设置", "MenuRunner Settings")
-            w.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
-            w.titlebarAppearsTransparent = true
-            w.isReleasedWhenClosed = false
-            w.center()
-            settingsWindow = w
-        }
+        panel.settingsModel = settingsModel
+        if !panel.isVisible, let button = statusItem.button { panel.show(below: button) }
         settingsModel.login = SMAppService.mainApp.status == .enabled
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        panel.showSettings()
     }
 
     private func popSettings(from view: NSView) {
