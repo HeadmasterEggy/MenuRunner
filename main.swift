@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import ServiceManagement
 import IOKit.ps
 import IOKit
@@ -184,6 +185,23 @@ enum GPUMonitor {
         }
         return best
     }
+
+    /// GPU 正在使用的（共享）内存，字节
+    static func memoryInUse() -> Double? {
+        var iter: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iter) == KERN_SUCCESS else { return nil }
+        defer { IOObjectRelease(iter) }
+        var total: Double?
+        var entry = IOIteratorNext(iter)
+        while entry != 0 {
+            defer { IOObjectRelease(entry); entry = IOIteratorNext(iter) }
+            if let stats = IORegistryEntryCreateCFProperty(entry, "PerformanceStatistics" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? [String: Any], let v = (stats["In use system memory"] as? NSNumber)?.doubleValue {
+                total = (total ?? 0) + v
+            }
+        }
+        return total
+    }
 }
 
 // MARK: - 网络速度
@@ -208,6 +226,9 @@ final class NetMonitor {
     }
 
     /// 两次调用之间的速度（字节/秒）
+    /// 从 MenuRunner 启动以来累计的上传 / 下载字节
+    private(set) var totalUp: Double = 0, totalDown: Double = 0
+
     func rate() -> (up: Double, down: Double) {
         let now = ProcessInfo.processInfo.systemUptime, t = totals()
         defer { prev = (t.rx, t.tx, now) }
@@ -216,6 +237,7 @@ final class NetMonitor {
         // 计数器可能回绕（32 位）或网卡重置，出现负值时当作 0
         let down = t.rx >= p.rx ? Double(t.rx - p.rx) / dt : 0
         let up = t.tx >= p.tx ? Double(t.tx - p.tx) / dt : 0
+        totalDown += down * dt; totalUp += up * dt
         return (up, down)
     }
 
@@ -1862,6 +1884,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         // 只重画需要动的：曲线卡片每帧；其他卡片只在数值缓动期间（打开 / 每次采样后 0.8 秒）
         let settling = now < settleUntil
         for c in cards where c.continuous || settling { c.needsDisplay = true }
+        if onMainPage, model.battery?.state == "charging", mainPage.cards.count > 6 { mainPage.cards[6].needsDisplay = true }   // 充电动画
     }
 
     func redrawAll() { cards.forEach { $0.needsDisplay = true; $0.displayIfNeeded() } }
@@ -1905,6 +1928,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let m = model
         Draw.title("cpu.fill", "GPU", in: w, tint: .systemGreen)
         Draw.text(m.gpu == nil ? "--" : Draw.pct(m.v("gpu")), NSPoint(x: w - 14, y: 8), size: 20, weight: .semibold, right: true, mono: true)
+        if let mem = gpuMemory {   // 显存（Apple 芯片与 CPU 共享内存）
+            Draw.text(L("显存 ", "GPU mem ") + SystemInfo.gb(mem), NSPoint(x: 14, y: 28), size: 10, color: .glassSecondary)
+        }
         let chart = NSRect(x: 14, y: 44, width: w - 28, height: 60)
         Draw.chartBackground(chart)
         Draw.area(chart, m.gpuHistory, scroll: m.scroll, color: .systemGreen, dot: true)
@@ -1939,6 +1965,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
     }
 
     var memoryPressure = 1
+    var gpuMemory: Double?
+    var netTotals: (up: Double, down: Double) = (0, 0)
 
     private func drawMemory(_ w: CGFloat) {
         let m = model
@@ -2010,7 +2038,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
         outline.lineWidth = 1.5; NSColor.glassSecondary.setStroke(); outline.stroke()
         NSColor.glassSecondary.setFill()
         NSBezierPath(roundedRect: NSRect(x: body.maxX + 2, y: body.midY - 4, width: 3, height: 8), xRadius: 1.5, yRadius: 1.5).fill()
-        (b.percent <= 20 ? NSColor.systemRed : (b.percent <= 40 ? .systemYellow : .systemGreen)).setFill()
+        let base: NSColor = b.percent <= 20 ? .systemRed : (b.percent <= 40 ? .systemYellow : .systemGreen)
+        // 充电时电量条“呼吸”：亮度随时间起伏
+        let pulse = b.state == "charging" ? 0.65 + 0.35 * (0.5 + 0.5 * sin(CACurrentMediaTime() * 3)) : 1
+        base.withAlphaComponent(pulse).setFill()
         NSBezierPath(roundedRect: NSRect(x: body.minX + 3, y: body.minY + 3, width: (body.width - 6) * CGFloat(f), height: body.height - 6),
                      xRadius: 3, yRadius: 3).fill()
         if b.state == "charging" { Draw.symbol("bolt.fill", NSPoint(x: body.midX - 6, y: body.minY + 3), size: 11, color: .white) }
@@ -2046,6 +2077,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
         Draw.area(chart, m.netHistory.map { $0.down / peak }, scroll: m.scroll, color: .systemTeal, dot: true)
         Draw.area(chart, m.netHistory.map { $0.up / peak }, scroll: m.scroll, color: .systemPink, line: true)
         Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 6, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
+        func bytes(_ b: Double) -> String { b >= 1_073_741_824 ? String(format: "%.2f GB", b / 1_073_741_824) : String(format: "%.0f MB", b / 1_048_576) }
+        Draw.text(L("本次 ", "Session ") + "↑ " + bytes(netTotals.up) + "  ↓ " + bytes(netTotals.down),
+                  NSPoint(x: chart.minX + 6, y: chart.minY + 3), size: 9, color: .glassTertiary, mono: true)
     }
 }
 
@@ -2085,7 +2119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         guard let button = statusItem.button else { return }
-        button.image = frames[0]
+        button.image = NSImage(size: frames[0].size)   // 透明占位，runner 由 runLayer 播放
         button.imagePosition = .imageLeft
         button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         button.target = self
@@ -2095,12 +2129,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildSettingsMenu()
         appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] b, _ in
             // 彩色 runner 的猫身颜色随深浅色变；只在深 / 浅真正切换时重画（这个通知会频繁触发）
-            guard let self, !self.runner.template else { return }
+            guard let self else { return }
             let dark = b.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             guard dark != self.lastDark else { return }
             self.lastDark = dark
             self.frames = self.runner.frames(appearance: b.effectiveAppearance)
+            self.installRunAnimation()                 // 单色 runner 重新上色（深色 → 白，浅色 → 黑）
         }
+        installRunAnimation()
         // 存储页要用的各应用大小：启动后在后台慢慢算好
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in self?.panel.detail.prewarmStorage() }
         panel.onSettings = { [weak self] v in self?.popSettings(from: v) }
@@ -2226,6 +2262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runner = r; frames = r.frames(appearance: statusItem.button?.effectiveAppearance); frameIndex = 0
             UserDefaults.standard.set(id, forKey: "runner")
             updateStatusImage()
+            installRunAnimation()
         case "barMetric":
             barMetric = id; UserDefaults.standard.set(id, forKey: "barMetric"); sample()
         case "barStyle":
@@ -2304,14 +2341,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:        title = " " + pct(l.total)
         }
         statusItem.button?.title = barStyle == "graph" ? "" : title
+        // 悬停菜单栏图标的摘要
+        var tip = ["CPU " + pct(l.total), L("内存 ", "Memory ") + pct(m.used / m.total)]
+        if let g { tip.append("GPU " + pct(g)) }
+        if let soc = t.soc { tip.append(L("温度 ", "Temp ") + TempUnit.format(soc, decimals: 0)) }
+        if let bat { tip.append(L("电池 ", "Battery ") + "\(bat.percent)%") }
+        statusItem.button?.toolTip = tip.joined(separator: " · ")
+        if panel.isVisible {
+            panel.gpuMemory = GPUMonitor.memoryInUse()
+            panel.netTotals = (netMon.totalUp, netMon.totalDown)
+        }
         updateStatusImage()
         scheduleAnimation()
     }
 
     // MARK: 菜单栏动态小图标（单色模板图，随深浅色菜单栏自动变色）
+    /// 按钮图片：runner 的位置留空（由 runLayer 播放动画），右侧可选的迷你图表。只在采样时更新，不再每帧更新
     private func updateStatusImage() {
         let rf = frames[frameIndex]
-        guard barStyle != "text", barMetric != "none" else { statusItem.button?.image = rf; return }
+        let placeholder = NSImage(size: rf.size)                 // 透明占位：保留宽度，runner 由图层画
+        guard barStyle != "text", barMetric != "none" else {
+            statusItem.button?.image = placeholder; layoutRunLayer(); return
+        }
         let gw: CGFloat
         switch barMetric {
         case "battery": gw = 22
@@ -2321,12 +2372,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let h = max(rf.size.height, 18)
         let size = NSSize(width: rf.size.width + 4 + gw, height: h)
         let img = NSImage(size: size, flipped: false) { [weak self] _ in
-            rf.draw(in: NSRect(x: 0, y: (h - rf.size.height) / 2, width: rf.size.width, height: rf.size.height))
             self?.drawMini(in: NSRect(x: rf.size.width + 4, y: (h - 14) / 2, width: gw, height: 14))
             return true
         }
         img.isTemplate = true
         statusItem.button?.image = img
+        layoutRunLayer()
+    }
+
+    // MARK: 图层动画：动画由系统渲染服务器播放，app 每帧不需要做任何事
+    // （之前每帧换按钮图片，macOS 每次都要重排菜单栏并把图标截图复制到每块显示器，占 ~1% CPU / 帧率）
+    private let runLayer = CALayer()
+    private var runFps: Double = 0
+
+    /// 单色 runner 按菜单栏深浅色上色；彩色 runner 原样
+    private func cgFrames() -> [CGImage] {
+        let appearance = statusItem.button?.effectiveAppearance ?? NSAppearance.currentDrawing()
+        return frames.compactMap { img in
+            let scale: CGFloat = 2, size = img.size
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                       bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                       colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            rep.size = size
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            NSGraphicsContext.current?.imageInterpolation = .none
+            img.draw(in: NSRect(origin: .zero, size: size))
+            if runner.template {
+                appearance.performAsCurrentDrawingAppearance {
+                    NSColor.labelColor.setFill()
+                    NSRect(origin: .zero, size: size).fill(using: .sourceAtop)
+                }
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            return rep.cgImage
+        }
+    }
+
+    private func installRunAnimation() {
+        guard let button = statusItem.button else { return }
+        if runLayer.superlayer == nil {
+            button.wantsLayer = true
+            runLayer.magnificationFilter = .nearest
+            runLayer.contentsGravity = .resize
+            button.layer?.addSublayer(runLayer)
+        }
+        let cg = cgFrames()
+        guard !cg.isEmpty else { return }
+        runLayer.removeAllAnimations()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        runLayer.contents = cg[0]
+        CATransaction.commit()
+        let anim = CAKeyframeAnimation(keyPath: "contents")
+        anim.values = cg
+        anim.calculationMode = .discrete
+        anim.duration = Double(cg.count)          // 速率 1 = 每秒 1 帧；真实帧率由 layer.speed 控制
+        anim.repeatCount = .infinity
+        runLayer.beginTime = 0; runLayer.timeOffset = 0
+        runLayer.add(anim, forKey: "run")
+        if runFps > 0 { setRunSpeed(runFps, force: true) }
+        layoutRunLayer()
+    }
+
+    /// 改变播放速率而不跳帧：把当前进度记进 timeOffset 再换速度
+    private func setRunSpeed(_ fps: Double, force: Bool = false) {
+        guard force || abs(fps - runFps) > 0.05 else { return }
+        runFps = fps
+        let now = CACurrentMediaTime()
+        let local = runLayer.convertTime(now, from: nil)
+        runLayer.speed = Float(fps)
+        runLayer.timeOffset = local
+        runLayer.beginTime = now
+    }
+
+    /// 让图层对准按钮里图片（占位）所在的位置
+    private func layoutRunLayer() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let b = self.statusItem.button, let cell = b.cell as? NSButtonCell else { return }
+            let r = cell.imageRect(forBounds: b.bounds)
+            let size = self.frames.first?.size ?? .zero
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            self.runLayer.frame = CGRect(x: r.minX, y: r.midY - size.height / 2, width: size.width, height: size.height)
+            CATransaction.commit()
+        }
     }
 
     private func drawMini(in r: NSRect) {
@@ -2404,20 +2532,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// CPU 越高跑得越快：0% → 4 帧/秒，100% → 40 帧/秒（指数变化）
     private func scheduleAnimation() {
-        // 跟随占用率，按“倍数”变化（人眼感知速度看的是快了几倍）：占用每增加 30%，速度翻倍
-        // 0% → 4，50% → 13，70% → 20，100% → 40 帧/秒
+        // 跟随占用率，按“倍数”变化（人眼感知速度看的是快了几倍）：0% → 4，50% → 13，70% → 20，100% → 40 帧/秒
+        // 动画由图层在渲染服务器里播放，帧率高低几乎不影响 CPU
         let u = min(max(usage, 0), 1)
         let fps = 4 * pow(10, u)
         let interval = 1 / fps
         if CommandLine.arguments.contains("--fps-log") { NSLog("fps debug: usage=%.0f%% fps=%.1f", u * 100, fps) }
-        animTimer?.invalidate()
-        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.frameIndex = (self.frameIndex + 1) % self.frames.count
-            self.updateStatusImage()
-        }
-        RunLoop.main.add(t, forMode: .common)
-        animTimer = t
+        _ = interval
+        setRunSpeed(fps)
     }
 
     @objc private func toggleLogin(_ sender: NSMenuItem) {
@@ -2583,6 +2705,8 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--render" {
     let panel = PanelController(model: model)
     panel.updateBatteryTime()
     panel.memoryPressure = SystemInfo.memoryPressure()
+    panel.gpuMemory = GPUMonitor.memoryInUse()
+    panel.netTotals = (net.totalUp, net.totalDown)
     panel.detail.refresh(.cpu); Thread.sleep(forTimeInterval: 0.8); panel.detail.refresh(.cpu)
     let v = panel.debugMainView, sz = v.frame.size
     let sheet = NSImage(size: NSSize(width: sz.width * 2 + 20, height: sz.height), flipped: false) { _ in
