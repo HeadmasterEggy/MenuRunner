@@ -13,11 +13,14 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>CFBundleIdentifier</key><string>local.joey.menurunner</string>
   <key>CFBundleExecutable</key><string>MenuRunner</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.5.2</string>
+  <key>CFBundleShortVersionString</key><string>1.5.3</string>
   <key>LSUIElement</key><true/>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
 </dict></plist>
 PLIST
+mkdir -p $APP/Contents/Resources
+cp assets/AppIcon.icns $APP/Contents/Resources/AppIcon.icns   # 由 MenuRunner --icon 生成，见 README
 codesign --force -s - $APP
 echo "Built $PWD/$APP"
 

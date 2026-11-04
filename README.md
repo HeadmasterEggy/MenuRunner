@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/icon.png" width="128" alt="MenuRunner icon">
+
 # MenuRunner
 
 **A tiny macOS menu bar runner + Liquid Glass system monitor**
@@ -53,6 +55,14 @@ Requires macOS 26+ on Apple Silicon and the Xcode Command Line Tools.
 ./build.sh      # compile, ad-hoc sign, install to ~/Applications
 ./make_dmg.sh   # build dist/MenuRunner-<version>.dmg
 ```
+
+Regenerate the app icon (`assets/AppIcon.icns`):
+
+```sh
+MenuRunner.app/Contents/MacOS/MenuRunner --icon /tmp/AppIcon.iconset
+iconutil -c icns /tmp/AppIcon.iconset -o assets/AppIcon.icns
+```
+
 
 Debug helpers:
 

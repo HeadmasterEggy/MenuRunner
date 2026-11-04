@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/icon.png" width="128" alt="MenuRunner icon">
+
 # MenuRunner
 
 **macOS 菜单栏小跑者 + 液态玻璃系统监控**
@@ -53,6 +55,14 @@
 ./build.sh      # 编译、本地签名、安装到 ~/Applications
 ./make_dmg.sh   # 生成 dist/MenuRunner-<版本>.dmg
 ```
+
+重新生成 app 图标（`assets/AppIcon.icns`）：
+
+```sh
+MenuRunner.app/Contents/MacOS/MenuRunner --icon /tmp/AppIcon.iconset
+iconutil -c icns /tmp/AppIcon.iconset -o assets/AppIcon.icns
+```
+
 
 调试命令：
 
