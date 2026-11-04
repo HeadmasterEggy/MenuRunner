@@ -184,6 +184,23 @@ enum GPUMonitor {
         }
         return best
     }
+
+    /// GPU 正在使用的（共享）内存，字节
+    static func memoryInUse() -> Double? {
+        var iter: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iter) == KERN_SUCCESS else { return nil }
+        defer { IOObjectRelease(iter) }
+        var total: Double?
+        var entry = IOIteratorNext(iter)
+        while entry != 0 {
+            defer { IOObjectRelease(entry); entry = IOIteratorNext(iter) }
+            if let stats = IORegistryEntryCreateCFProperty(entry, "PerformanceStatistics" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? [String: Any], let v = (stats["In use system memory"] as? NSNumber)?.doubleValue {
+                total = (total ?? 0) + v
+            }
+        }
+        return total
+    }
 }
 
 // MARK: - 网络速度
@@ -208,6 +225,9 @@ final class NetMonitor {
     }
 
     /// 两次调用之间的速度（字节/秒）
+    /// 从 MenuRunner 启动以来累计的上传 / 下载字节
+    private(set) var totalUp: Double = 0, totalDown: Double = 0
+
     func rate() -> (up: Double, down: Double) {
         let now = ProcessInfo.processInfo.systemUptime, t = totals()
         defer { prev = (t.rx, t.tx, now) }
@@ -216,6 +236,7 @@ final class NetMonitor {
         // 计数器可能回绕（32 位）或网卡重置，出现负值时当作 0
         let down = t.rx >= p.rx ? Double(t.rx - p.rx) / dt : 0
         let up = t.tx >= p.tx ? Double(t.tx - p.tx) / dt : 0
+        totalDown += down * dt; totalUp += up * dt
         return (up, down)
     }
 
@@ -1862,6 +1883,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         // 只重画需要动的：曲线卡片每帧；其他卡片只在数值缓动期间（打开 / 每次采样后 0.8 秒）
         let settling = now < settleUntil
         for c in cards where c.continuous || settling { c.needsDisplay = true }
+        if onMainPage, model.battery?.state == "charging", mainPage.cards.count > 6 { mainPage.cards[6].needsDisplay = true }   // 充电动画
     }
 
     func redrawAll() { cards.forEach { $0.needsDisplay = true; $0.displayIfNeeded() } }
@@ -1905,6 +1927,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let m = model
         Draw.title("cpu.fill", "GPU", in: w, tint: .systemGreen)
         Draw.text(m.gpu == nil ? "--" : Draw.pct(m.v("gpu")), NSPoint(x: w - 14, y: 8), size: 20, weight: .semibold, right: true, mono: true)
+        if let mem = gpuMemory {   // 显存（Apple 芯片与 CPU 共享内存）
+            Draw.text(L("显存 ", "GPU mem ") + SystemInfo.gb(mem), NSPoint(x: 14, y: 28), size: 10, color: .glassSecondary)
+        }
         let chart = NSRect(x: 14, y: 44, width: w - 28, height: 60)
         Draw.chartBackground(chart)
         Draw.area(chart, m.gpuHistory, scroll: m.scroll, color: .systemGreen, dot: true)
@@ -1939,6 +1964,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
     }
 
     var memoryPressure = 1
+    var gpuMemory: Double?
+    var netTotals: (up: Double, down: Double) = (0, 0)
 
     private func drawMemory(_ w: CGFloat) {
         let m = model
@@ -2010,7 +2037,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
         outline.lineWidth = 1.5; NSColor.glassSecondary.setStroke(); outline.stroke()
         NSColor.glassSecondary.setFill()
         NSBezierPath(roundedRect: NSRect(x: body.maxX + 2, y: body.midY - 4, width: 3, height: 8), xRadius: 1.5, yRadius: 1.5).fill()
-        (b.percent <= 20 ? NSColor.systemRed : (b.percent <= 40 ? .systemYellow : .systemGreen)).setFill()
+        let base: NSColor = b.percent <= 20 ? .systemRed : (b.percent <= 40 ? .systemYellow : .systemGreen)
+        // 充电时电量条“呼吸”：亮度随时间起伏
+        let pulse = b.state == "charging" ? 0.65 + 0.35 * (0.5 + 0.5 * sin(CACurrentMediaTime() * 3)) : 1
+        base.withAlphaComponent(pulse).setFill()
         NSBezierPath(roundedRect: NSRect(x: body.minX + 3, y: body.minY + 3, width: (body.width - 6) * CGFloat(f), height: body.height - 6),
                      xRadius: 3, yRadius: 3).fill()
         if b.state == "charging" { Draw.symbol("bolt.fill", NSPoint(x: body.midX - 6, y: body.minY + 3), size: 11, color: .white) }
@@ -2046,6 +2076,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
         Draw.area(chart, m.netHistory.map { $0.down / peak }, scroll: m.scroll, color: .systemTeal, dot: true)
         Draw.area(chart, m.netHistory.map { $0.up / peak }, scroll: m.scroll, color: .systemPink, line: true)
         Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 6, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
+        func bytes(_ b: Double) -> String { b >= 1_073_741_824 ? String(format: "%.2f GB", b / 1_073_741_824) : String(format: "%.0f MB", b / 1_048_576) }
+        Draw.text(L("本次 ", "Session ") + "↑ " + bytes(netTotals.up) + "  ↓ " + bytes(netTotals.down),
+                  NSPoint(x: chart.minX + 6, y: chart.minY + 3), size: 9, color: .glassTertiary, mono: true)
     }
 }
 
@@ -2304,6 +2337,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:        title = " " + pct(l.total)
         }
         statusItem.button?.title = barStyle == "graph" ? "" : title
+        // 悬停菜单栏图标的摘要
+        var tip = ["CPU " + pct(l.total), L("内存 ", "Memory ") + pct(m.used / m.total)]
+        if let g { tip.append("GPU " + pct(g)) }
+        if let soc = t.soc { tip.append(L("温度 ", "Temp ") + TempUnit.format(soc, decimals: 0)) }
+        if let bat { tip.append(L("电池 ", "Battery ") + "\(bat.percent)%") }
+        statusItem.button?.toolTip = tip.joined(separator: " · ")
+        if panel.isVisible {
+            panel.gpuMemory = GPUMonitor.memoryInUse()
+            panel.netTotals = (netMon.totalUp, netMon.totalDown)
+        }
         updateStatusImage()
         scheduleAnimation()
     }
@@ -2583,6 +2626,8 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--render" {
     let panel = PanelController(model: model)
     panel.updateBatteryTime()
     panel.memoryPressure = SystemInfo.memoryPressure()
+    panel.gpuMemory = GPUMonitor.memoryInUse()
+    panel.netTotals = (net.totalUp, net.totalDown)
     panel.detail.refresh(.cpu); Thread.sleep(forTimeInterval: 0.8); panel.detail.refresh(.cpu)
     let v = panel.debugMainView, sz = v.frame.size
     let sheet = NSImage(size: NSSize(width: sz.width * 2 + 20, height: sz.height), flipped: false) { _ in
