@@ -2320,10 +2320,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// CPU 越高跑得越快：0% → 0.2s/帧，100% → 0.067s/帧
+    /// CPU 越高跑得越快：0% → 2 帧/秒，100% → 20 帧/秒
     private func scheduleAnimation() {
-        // 0% → 5 帧/秒，100% → 15 帧/秒（再快肉眼差别不大，但菜单栏重绘开销翻倍）
-        let interval = 0.2 - 0.133 * min(max(usage, 0), 1)
+        // 跟随占用率：0% → 2 帧/秒，100% → 20 帧/秒；1.3 次方曲线：20% ≈ 4，50% ≈ 9，100% = 20，
+        // 平时 30–60% 的占用和满载之间也能明显看出快慢
+        let u = min(max(usage, 0), 1)
+        let fps = 2 + 18 * pow(u, 1.3)
+        let interval = 1 / fps
+        if CommandLine.arguments.contains("--fps-log") { NSLog("fps debug: usage=%.0f%% fps=%.1f", u * 100, fps) }
         animTimer?.invalidate()
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             guard let self else { return }
