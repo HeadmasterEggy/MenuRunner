@@ -15,7 +15,7 @@
 
 <img src="docs/panel.png" width="260" alt="面板">&nbsp;&nbsp;<img src="docs/cpu.png" width="260" alt="CPU 详情">&nbsp;&nbsp;<img src="docs/memory.png" width="260" alt="按应用查看内存">
 
-<img src="docs/settings.png" width="200" alt="设置">
+<img src="docs/settings.png" width="260" alt="设置">
 
 <img src="docs/rocket.png" width="640" alt="橘猫火箭">
 
