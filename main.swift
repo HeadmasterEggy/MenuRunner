@@ -2,6 +2,7 @@ import AppKit
 import ServiceManagement
 import IOKit.ps
 import IOKit
+import SystemConfiguration
 
 // MARK: - 语言（跟随系统 / 中文 / English）
 enum Lang {
@@ -373,11 +374,26 @@ struct Runner {
 struct Temps { var soc: Double?, battery: Double?, ssd: Double? }
 
 final class TempMonitor {
+    static let shared = TempMonitor()
     private let client: AnyObject? = {
         guard let c = IOHIDEventSystemClientCreate(kCFAllocatorDefault)?.takeRetainedValue() else { return nil }
         _ = IOHIDEventSystemClientSetMatching(c, ["PrimaryUsagePage": 0xff00, "PrimaryUsage": 5] as CFDictionary)
         return c
     }()
+
+    /// 所有传感器（同名取平均），按名称排序
+    func readAll() -> [(String, Double)] {
+        guard let client, let services = IOHIDEventSystemClientCopyServices(client)?.takeRetainedValue() as? [AnyObject] else { return [] }
+        var g: [String: [Double]] = [:]
+        for s in services {
+            guard let name = IOHIDServiceClientCopyProperty(s, "Product" as CFString)?.takeRetainedValue() as? String,
+                  let e = IOHIDServiceClientCopyEvent(s, 15, 0, 0)?.takeRetainedValue() else { continue }
+            let v = IOHIDEventGetFloatValue(e, 15 << 16)
+            if v > 0 && v < 150 { g[name, default: []].append(v) }
+        }
+        return g.map { ($0.key, $0.value.reduce(0, +) / Double($0.value.count)) }
+            .sorted { $0.0.localizedStandardCompare($1.0) == .orderedAscending }
+    }
 
     func read() -> Temps {
         guard let client, let services = IOHIDEventSystemClientCopyServices(client)?.takeRetainedValue() as? [AnyObject] else { return Temps() }
@@ -505,6 +521,370 @@ enum TempUnit {
     }
 }
 
+// MARK: - 各应用内存占用（与活动监视器“内存”列同口径：phys_footprint）
+struct AppMemory { var name: String, path: String?, bytes: UInt64, processes: Int }
+
+enum ProcessMemory {
+    /// 按应用汇总（同一 .app 下的 Helper 进程合并），从大到小
+    static func top(_ limit: Int) -> [AppMemory] {
+        let n = proc_listallpids(nil, 0)
+        guard n > 0 else { return [] }
+        var pids = [pid_t](repeating: 0, count: Int(n) * 2)
+        let got = proc_listallpids(&pids, Int32(MemoryLayout<pid_t>.size * pids.count))
+        var groups: [String: AppMemory] = [:]
+        var pathBuf = [CChar](repeating: 0, count: 4096)
+        for pid in pids.prefix(Int(max(got, 0))) where pid > 0 {
+            var usage = rusage_info_current()
+            let r = withUnsafeMutablePointer(to: &usage) {
+                $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, $0) }
+            }
+            guard r == 0, usage.ri_phys_footprint > 0 else { continue }   // 无权限（root 进程）时跳过
+            let len = proc_pidpath(pid, &pathBuf, UInt32(pathBuf.count))
+            let path = len > 0 ? String(cString: pathBuf) : ""
+            var key: String, name: String, appPath: String?
+            if let range = path.range(of: ".app/") {                       // 取最外层 .app
+                appPath = String(path[..<range.lowerBound]) + ".app"
+                key = appPath!
+                name = (appPath! as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "")
+            } else {
+                name = (path as NSString).lastPathComponent               // 完整文件名（proc_name 会截断）
+                if name.isEmpty {
+                    var nameBuf = [CChar](repeating: 0, count: 256)
+                    proc_name(pid, &nameBuf, UInt32(nameBuf.count))
+                    name = String(cString: nameBuf)
+                }
+                key = path.isEmpty ? name : path
+            }
+            var g = groups[key] ?? AppMemory(name: name, path: appPath, bytes: 0, processes: 0)
+            g.bytes += usage.ri_phys_footprint
+            g.processes += 1
+            groups[key] = g
+        }
+        return Array(groups.values.sorted { $0.bytes > $1.bytes }.prefix(limit))
+    }
+
+    static func format(_ b: UInt64) -> String {
+        let d = Double(b)
+        return d >= 1_073_741_824 ? String(format: "%.2f GB", d / 1_073_741_824) : String(format: "%.0f MB", d / 1_048_576)
+    }
+
+    private static var iconCache: [String: NSImage] = [:]
+    static func icon(_ path: String?) -> NSImage {
+        let key = path ?? ""
+        if let i = iconCache[key] { return i }
+        let img = path.map { NSWorkspace.shared.icon(forFile: $0) }
+            ?? NSImage(systemSymbolName: "gearshape.2", accessibilityDescription: nil)!
+        iconCache[key] = img
+        return img
+    }
+}
+
+// MARK: - 详情页数据（每张卡片点进去看到的内容）
+struct AppStat { var name: String, path: String?, value: Double, processes: Int }
+struct NetInterface { var bsd: String, name: String, ipv4: String, up: Double, down: Double }
+struct VolumeInfo { var name: String, path: String, used: Double, total: Double }
+
+enum DetailKind { case system, cpu, gpu, memory, temps, storage, battery, network }
+
+/// 进程 → 所属应用（取最外层 .app；否则用可执行文件名）
+enum AppIdentity {
+    static func of(_ pid: pid_t) -> (key: String, name: String, path: String?) {
+        var buf = [CChar](repeating: 0, count: 4096)
+        let len = proc_pidpath(pid, &buf, UInt32(buf.count))
+        let path = len > 0 ? String(cString: buf) : ""
+        if let r = path.range(of: ".app/") {
+            let app = String(path[..<r.lowerBound]) + ".app"
+            return (app, (app as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: ""), app)
+        }
+        var name = (path as NSString).lastPathComponent
+        if name.isEmpty {
+            var nb = [CChar](repeating: 0, count: 256); proc_name(pid, &nb, UInt32(nb.count)); name = String(cString: nb)
+        }
+        return (path.isEmpty ? name : path, name, nil)
+    }
+
+    static func group(_ perPid: [pid_t: Double], limit: Int) -> [AppStat] {
+        var g: [String: AppStat] = [:]
+        for (pid, v) in perPid where v > 0 {
+            let id = of(pid)
+            var a = g[id.key] ?? AppStat(name: id.name, path: id.path, value: 0, processes: 0)
+            a.value += v; a.processes += 1
+            g[id.key] = a
+        }
+        return Array(g.values.sorted { $0.value > $1.value }.prefix(limit))
+    }
+
+    static func allPids() -> [pid_t] {
+        let n = proc_listallpids(nil, 0)
+        guard n > 0 else { return [] }
+        var pids = [pid_t](repeating: 0, count: Int(n) * 2)
+        let got = proc_listallpids(&pids, Int32(MemoryLayout<pid_t>.size * pids.count))
+        return pids.prefix(Int(max(got, 0))).filter { $0 > 0 }
+    }
+}
+
+final class DetailProvider {
+    var cores: [Double] = []
+    var cpuApps: [AppStat] = [], gpuApps: [AppStat] = [], netApps: [AppStat] = []
+    var memApps: [AppMemory] = []
+    var interfaces: [NetInterface] = []
+    var volumes: [VolumeInfo] = []
+    var sensors: [(String, Double)] = []
+    var gpuStats: [String: Int] = [:]
+    var sampled = false
+
+    private var prevCores: [Int32]?
+    private var prevCPU: [pid_t: UInt64] = [:], prevGPU: [pid_t: UInt64] = [:]
+    private var prevIf: [String: (UInt64, UInt64)] = [:]
+    private var prevTime = CACurrentMediaTime()
+    private let timebase: Double = { var tb = mach_timebase_info(); mach_timebase_info(&tb); return Double(tb.numer) / Double(tb.denom) }()
+    private lazy var ifNames: [String: String] = {
+        var map: [String: String] = [:]
+        for i in (SCNetworkInterfaceCopyAll() as? [SCNetworkInterface]) ?? [] {
+            if let b = SCNetworkInterfaceGetBSDName(i) as String?, let n = SCNetworkInterfaceGetLocalizedDisplayName(i) as String? { map[b] = n }
+        }
+        return map
+    }()
+
+    func reset() { stopNetwork(); prevCores = nil; prevCPU = [:]; prevGPU = [:]; prevIf = [:]; sampled = false
+                   cores = []; cpuApps = []; gpuApps = []; netApps = [] }
+
+    func refresh(_ kind: DetailKind) {
+        let now = CACurrentMediaTime(), dt = max(now - prevTime, 0.001)
+        defer { prevTime = now }
+        switch kind {
+        case .cpu:     refreshCores(); refreshCPUApps(dt)
+        case .gpu:     refreshGPU(dt)
+        case .memory:  memApps = ProcessMemory.top(PanelController.procRows)
+        case .temps:   sensors = TempMonitor.shared.readAll()
+        case .storage: refreshVolumes()
+        case .network: refreshInterfaces(dt); refreshNetApps()
+        default: break
+        }
+        sampled = true
+    }
+
+    // 每个核心占用
+    private func refreshCores() {
+        var n: natural_t = 0, info: processor_info_array_t?, count: mach_msg_type_number_t = 0
+        guard host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &n, &info, &count) == KERN_SUCCESS, let info else { return }
+        let arr = Array(UnsafeBufferPointer(start: info, count: Int(count)))
+        vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(Int(count) * MemoryLayout<integer_t>.stride))
+        if let p = prevCores, p.count == arr.count {
+            cores = (0..<Int(n)).map { i in
+                let b = i * Int(CPU_STATE_MAX)
+                func d(_ k: Int32) -> Double { Double(arr[b + Int(k)] &- p[b + Int(k)]) }
+                let busy = d(CPU_STATE_USER) + d(CPU_STATE_SYSTEM) + d(CPU_STATE_NICE), total = busy + d(CPU_STATE_IDLE)
+                return total > 0 ? busy / total : 0
+            }
+        }
+        prevCores = arr
+    }
+
+    // 各应用 CPU%（与活动监视器一致：多线程可超过 100%）
+    private func refreshCPUApps(_ dt: Double) {
+        var cur: [pid_t: UInt64] = [:], rate: [pid_t: Double] = [:]
+        for pid in AppIdentity.allPids() {
+            var u = rusage_info_current()
+            let r = withUnsafeMutablePointer(to: &u) { $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, $0) } }
+            guard r == 0 else { continue }
+            let t = u.ri_user_time + u.ri_system_time
+            cur[pid] = t
+            if let p = prevCPU[pid], t >= p { rate[pid] = Double(t - p) * timebase / (dt * 1e9) }
+        }
+        if !prevCPU.isEmpty { cpuApps = AppIdentity.group(rate, limit: 8) }
+        prevCPU = cur
+    }
+
+    // GPU：整体利用率 + 各应用（显卡驱动 AppUsage 里的累计 GPU 时间）
+    private func refreshGPU(_ dt: Double) {
+        var iter: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iter) == KERN_SUCCESS else { return }
+        defer { IOObjectRelease(iter) }
+        var cur: [pid_t: UInt64] = [:]
+        var accel = IOIteratorNext(iter)
+        while accel != 0 {
+            if let st = IORegistryEntryCreateCFProperty(accel, "PerformanceStatistics" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any] {
+                for k in ["Device Utilization %", "Renderer Utilization %", "Tiler Utilization %", "In use system memory", "Alloc system memory"] {
+                    if let v = st[k] as? Int { gpuStats[k] = v }
+                }
+            }
+            var it: io_iterator_t = 0
+            if IORegistryEntryCreateIterator(accel, kIOServicePlane, IOOptionBits(kIORegistryIterateRecursively), &it) == KERN_SUCCESS {
+                var c = IOIteratorNext(it)
+                while c != 0 {
+                    if let creator = IORegistryEntryCreateCFProperty(c, "IOUserClientCreator" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String,
+                       let usage = IORegistryEntryCreateCFProperty(c, "AppUsage" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [[String: Any]],
+                       let pidStr = creator.split(separator: ",").first?.split(separator: " ").last, let pid = pid_t(pidStr) {
+                        let t = usage.reduce(UInt64(0)) { $0 + ((($1["accumulatedGPUTime"] as? NSNumber)?.uint64Value) ?? 0) }
+                        cur[pid, default: 0] += t
+                    }
+                    IOObjectRelease(c); c = IOIteratorNext(it)
+                }
+                IOObjectRelease(it)
+            }
+            IOObjectRelease(accel); accel = IOIteratorNext(iter)
+        }
+        var rate: [pid_t: Double] = [:]
+        for (pid, t) in cur { if let p = prevGPU[pid], t >= p { rate[pid] = Double(t - p) / (dt * 1e9) } }
+        if !prevGPU.isEmpty { gpuApps = AppIdentity.group(rate, limit: 8) }
+        prevGPU = cur
+    }
+
+    // 网卡：名称、IPv4、实时速度
+    private func refreshInterfaces(_ dt: Double) {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0 else { return }
+        defer { freeifaddrs(head) }
+        var ips: [String: String] = [:], bytes: [String: (UInt64, UInt64)] = [:]
+        var p = head
+        while let ifa = p?.pointee {
+            defer { p = ifa.ifa_next }
+            let name = String(cString: ifa.ifa_name)
+            guard name != "lo0", let addr = ifa.ifa_addr, (ifa.ifa_flags & UInt32(IFF_UP)) != 0 else { continue }
+            if addr.pointee.sa_family == UInt8(AF_INET) {
+                var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
+                ips[name] = String(cString: host)
+            } else if addr.pointee.sa_family == UInt8(AF_LINK), let d = ifa.ifa_data {
+                let x = d.assumingMemoryBound(to: if_data.self).pointee
+                bytes[name] = (UInt64(x.ifi_ibytes), UInt64(x.ifi_obytes))
+            }
+        }
+        interfaces = ips.keys.sorted().prefix(3).map { n in
+            let b = bytes[n] ?? (0, 0), pb = prevIf[n] ?? b
+            return NetInterface(bsd: n, name: ifNames[n] ?? n, ipv4: ips[n] ?? "",
+                                up: b.1 >= pb.1 ? Double(b.1 - pb.1) / dt : 0, down: b.0 >= pb.0 ? Double(b.0 - pb.0) / dt : 0)
+        }
+        prevIf = bytes
+    }
+
+    // 各应用网络流量：常驻 nettop（-d 差值模式，每秒输出一组“这一秒的字节数”）
+    private var netProc: Process?
+    private var netPipe: Pipe?            // 必须持有，否则管道被释放、读不到数据
+    private var netBuffer = ""
+    private var netBlock: [pid_t: Double] = [:]
+    private var netBlocks = 0
+
+    private func refreshNetApps() {
+        guard netProc == nil else { return }
+        let p = Process()
+        // 经 script 套一个伪终端：nettop 输出到管道时会整块缓冲，要等很久才有数据；伪终端下逐行输出
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        p.arguments = ["-q", "/dev/null", "/usr/bin/nettop", "-P", "-d", "-x", "-L", "0", "-s", "1", "-J", "bytes_in,bytes_out"]
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        netBuffer = ""; netBlock = [:]; netBlocks = 0
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let text = String(decoding: h.availableData, as: UTF8.self)
+            DispatchQueue.main.async { self?.consumeNet(text) }
+        }
+        guard (try? p.run()) != nil else { return }
+        netProc = p; netPipe = pipe
+    }
+
+    private func consumeNet(_ chunk: String) {
+        netBuffer += chunk
+        while let nl = netBuffer.firstIndex(where: \.isNewline) {   // 伪终端输出 "\r\n"，Swift 里是一个字符
+            let line = netBuffer[..<nl].trimmingCharacters(in: .whitespacesAndNewlines); netBuffer.removeSubrange(...nl)
+            if line.hasPrefix(",") {                      // 新一组开始：发布上一组
+                if netBlocks >= 2 {   // 第一组是累计值，跳过
+                    netApps = AppIdentity.group(netBlock, limit: 8)
+                    if CommandLine.arguments.contains("--open-panel") {
+                        NSLog("net debug: block=%d apps=%d top=%@", netBlocks, netApps.count, netApps.first.map { "\($0.name) \(NetMonitor.format($0.value))" } ?? "-")
+                    }
+                }
+                netBlock = [:]; netBlocks += 1
+                continue
+            }
+            let f = line.split(separator: ",", omittingEmptySubsequences: false)
+            guard f.count >= 3, let i = Double(f[1]), let o = Double(f[2]),
+                  let pid = pid_t(f[0].split(separator: ".").last ?? "") else { continue }
+            netBlock[pid, default: 0] += i + o
+        }
+    }
+
+    func stopNetwork() {
+        netPipe?.fileHandleForReading.readabilityHandler = nil
+        netProc?.terminate(); netProc = nil; netPipe = nil
+        netApps = []
+    }
+
+    private func refreshVolumes() {
+        let keys: [URLResourceKey] = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
+        let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
+        volumes = urls.compactMap { u in
+            guard let v = try? u.resourceValues(forKeys: Set(keys)), let total = v.volumeTotalCapacity, total > 0 else { return nil }
+            let free = v.volumeAvailableCapacityForImportantUsage.map(Double.init) ?? Double(v.volumeAvailableCapacity ?? 0)
+            return VolumeInfo(name: v.volumeName ?? u.lastPathComponent, path: u.path, used: Double(total) - free, total: Double(total))
+        }.prefix(5).map { $0 }
+    }
+}
+
+// MARK: - 电池详细信息
+enum BatteryDetail {
+    static func rows() -> [(String, String)] {
+        let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("AppleSmartBattery"))
+        guard svc != 0 else { return [(L("电池", "Battery"), L("无电池", "No battery"))] }
+        defer { IOObjectRelease(svc) }
+        func num(_ k: String) -> NSNumber? { IORegistryEntryCreateCFProperty(svc, k as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber }
+        let data = IORegistryEntryCreateCFProperty(svc, "BatteryData" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any] ?? [:]
+        func int(_ k: String) -> Int? { num(k)?.intValue ?? (data[k] as? NSNumber)?.intValue }
+        let adapter = IORegistryEntryCreateCFProperty(svc, "AdapterDetails" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any]
+
+        var r: [(String, String)] = []
+        if let b = SystemInfo.battery() {
+            r.append((L("电量", "Charge"), "\(b.percent)%"))
+            r.append((L("状态", "Status"), SystemInfo.stateText(b.state)))
+        }
+        if let h = SystemInfo.batteryHealth() {
+            r.append((L("健康度", "Health"), Draw.pct(h.health)))
+            r.append((L("循环次数", "Cycle Count"), "\(h.cycles) / \(h.designCycles)"))
+        }
+        if let d = int("DesignCapacity") { r.append((L("设计容量", "Design Capacity"), "\(d) mAh")) }
+        if let f = int("NominalChargeCapacity") ?? int("AppleRawMaxCapacity") { r.append((L("满充容量", "Full Charge Capacity"), "\(f) mAh")) }
+        if let c = int("AppleRawCurrentCapacity") { r.append((L("当前容量", "Current Capacity"), "\(c) mAh")) }
+        let mv = Double(int("Voltage") ?? 0)
+        let ma = Double(Int32(truncatingIfNeeded: num("InstantAmperage")?.int64Value ?? num("Amperage")?.int64Value ?? 0))
+        if mv > 0 { r.append((L("电压", "Voltage"), String(format: "%.2f V", mv / 1000))) }
+        r.append((L("电流", "Current"), String(format: "%.0f mA", ma)))
+        r.append((L("功率", "Power"), String(format: "%.1f W", mv * ma / 1_000_000)))
+        if let t = TempMonitor.shared.read().battery { r.append((L("温度", "Temperature"), TempUnit.format(t))) }
+        if let a = adapter, let w = a["Watts"] as? Int { r.append((L("电源适配器", "Power Adapter"), "\(w) W")) }
+        if let tr = int("TimeRemaining"), tr > 0, tr < 65535 {
+            r.append((L("剩余时间", "Time Remaining"), String(format: "%d:%02d", tr / 60, tr % 60)))
+        }
+        return r
+    }
+}
+
+// MARK: - 本机详细信息
+enum SystemDetail {
+    static func rows(_ spec: MachineSpec) -> [(String, String)] {
+        let up = Int(ProcessInfo.processInfo.systemUptime)
+        let uptime = up >= 86400 ? L("\(up / 86400) 天 \(up % 86400 / 3600) 小时", "\(up / 86400)d \(up % 86400 / 3600)h")
+                                 : L("\(up / 3600) 小时 \(up % 3600 / 60) 分", "\(up / 3600)h \(up % 3600 / 60)m")
+        let screens = NSScreen.screens.map { s -> String in
+            let px = s.frame.size.applying(.init(scaleX: s.backingScaleFactor, y: s.backingScaleFactor))
+            return "\(s.localizedName) \(Int(px.width))×\(Int(px.height))"
+        }
+        var r: [(String, String)] = [
+            (L("机型", "Model"), spec.model),
+            (L("型号标识", "Model Identifier"), MachineSpec.sysctlString("hw.model")),
+            (L("芯片", "Chip"), spec.chip),
+            ("CPU", spec.eCores > 0 ? L("\(spec.pCores + spec.eCores) 核（\(spec.pCores) 性能 + \(spec.eCores) 能效）", "\(spec.pCores + spec.eCores) cores (\(spec.pCores)P + \(spec.eCores)E)") : "\(spec.pCores)"),
+            ("GPU", spec.gpuCores > 0 ? L("\(spec.gpuCores) 核", "\(spec.gpuCores) cores") : "--"),
+            (L("内存", "Memory"), "\(spec.memoryGB) GB"),
+            (L("硬盘", "Disk"), spec.diskText),
+            (L("系统", "macOS"), "\(spec.os) (\(MachineSpec.sysctlString("kern.osversion")))"),
+            (L("已运行", "Uptime"), uptime),
+            (L("主机名", "Computer Name"), Host.current().localizedName ?? "--"),
+        ]
+        for (i, s) in screens.prefix(2).enumerated() { r.append((i == 0 ? L("显示器", "Displays") : "", s)) }
+        return r
+    }
+}
+
 // MARK: - 数据模型：目标值 + 带缓动的显示值（动态效果）
 final class StatsModel {
     static var interval = 1.5
@@ -588,9 +968,14 @@ enum Draw {
     }
 
     /// 卡片标题：图标 + 名称
-    static func title(_ icon: String, _ name: String, in w: CGFloat, tint: NSColor = .labelColor) {
+    static func title(_ icon: String, _ name: String, in w: CGFloat, tint: NSColor = .labelColor, chevron: Bool = true) {
         let iw = symbol(icon, NSPoint(x: 14, y: 12), size: 13, color: tint)
-        text(name, NSPoint(x: 14 + max(iw, 14) + 6, y: 12), size: 12, weight: .semibold)
+        let x = 14 + max(iw, 14) + 6
+        text(name, NSPoint(x: x, y: 12), size: 12, weight: .semibold)
+        if chevron {   // 可点击提示
+            let tw = NSAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).size().width
+            symbol("chevron.right", NSPoint(x: x + tw + 4, y: 12), size: 9, color: .glassTertiary)
+        }
     }
 
     static func pct(_ v: Double) -> String { "\(Int((v * 100).rounded()))%" }
@@ -648,6 +1033,10 @@ enum Draw {
 // MARK: - 卡片：一块液态玻璃 + 自绘内容
 final class CardView: NSView {
     var drawer: (CGFloat) -> Void = { _ in }
+    var onClick: (() -> Void)?
+    override func mouseUp(with event: NSEvent) { onClick?() }
+    override func resetCursorRects() { if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) } }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var isFlipped: Bool { true }
     static var drawCount = 0
     override func draw(_ dirtyRect: NSRect) { CardView.drawCount += 1; drawer(bounds.width) }
@@ -674,30 +1063,27 @@ final class PanelController: NSObject, NSPopoverDelegate {
         build()
     }
 
-    private func build() {
-        let W = Self.width, g = Self.gap, half = (W - g) / 2
-        var layout: [(CGFloat, CGFloat, CGFloat, CGFloat, (CGFloat) -> Void)] = []
+    private struct Page { let view: NSView; let size: NSSize; let cards: [CardView] }
+    private var mainPage: Page!
+
+    /// 通用页面：rows = [(高度, [(x, 宽, 绘制, 点击)])]；底层玻璃、上层内容
+    private func makePage(_ rows: [(CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)])], button: ((CardView, CGFloat) -> Void)? = nil) -> Page {
+        let W = Self.width, g = Self.gap, M = Self.margin
+        var layout: [(CGFloat, CGFloat, CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)] = []
         var y: CGFloat = 0
-        func add(_ h: CGFloat, _ items: [(CGFloat, CGFloat, (CGFloat) -> Void)]) {
-            for (x, w, d) in items { layout.append((x, y, w, h, d)) }
+        for (h, items) in rows {
+            for (x, w, d, c) in items { layout.append((x, y, w, h, d, c)) }
             y += h + g
         }
-        add(56,  [(0, W, drawHeader)])
-        add(134, [(0, W, drawCPU)])
-        add(118, [(0, half, drawGPU), (half + g, half, drawTemps)])
-        add(84,  [(0, W, drawMemory)])
-        add(118, [(0, half, drawStorage), (half + g, half, drawBattery)])
-        add(96,  [(0, W, drawNetwork)])
-        let H = y - g, M = Self.margin
-
+        let H = y - g
         let size = NSSize(width: W + M * 2, height: H + M * 2)
-        // 底层：玻璃容器（只放玻璃）；上层：内容（不经过玻璃，避免被折射模糊）
         let root = NSView(frame: NSRect(origin: .zero, size: size))
         let container = NSGlassEffectContainerView(frame: root.bounds)
         container.spacing = g
         let glassHolder = NSView(frame: root.bounds)
         let contentLayer = NSView(frame: root.bounds)
-        for (x, top, w, h, d) in layout {
+        var cards: [CardView] = []
+        for (i, (x, top, w, h, d, click)) in layout.enumerated() {
             let frame = NSRect(x: M + x, y: M + H - top - h, width: w, height: h)
             let glass = NSGlassEffectView(frame: frame)
             glass.cornerRadius = 18
@@ -705,24 +1091,256 @@ final class PanelController: NSObject, NSPopoverDelegate {
             glassHolder.addSubview(glass)
             let card = CardView(frame: frame)
             card.drawer = d
+            card.onClick = click
             contentLayer.addSubview(card)
             cards.append(card)
-            if h == 56 {   // 标题栏里的设置按钮
-                let b = NSButton(image: NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")!,
-                                 target: self, action: #selector(settingsClicked(_:)))
-                b.isBordered = false
-                b.contentTintColor = .labelColor
-                b.frame = NSRect(x: w - 38, y: 16, width: 24, height: 24)
-                card.addSubview(b)
-            }
+            if i == 0 { button?(card, w) }       // 第一张卡片（标题栏）里的按钮
         }
         container.contentView = glassHolder
         root.addSubview(container)
         root.addSubview(contentLayer)
+        return Page(view: root, size: size, cards: cards)
+    }
+
+    private func build() {
+        let W = Self.width, g = Self.gap, half = (W - g) / 2
+        mainPage = makePage([
+            (56,  [(0, W, drawHeader, { [weak self] in self?.showDetail(.system) })]),
+            (134, [(0, W, drawCPU, { [weak self] in self?.showDetail(.cpu) })]),
+            (118, [(0, half, drawGPU, { [weak self] in self?.showDetail(.gpu) }), (half + g, half, drawTemps, { [weak self] in self?.showDetail(.temps) })]),
+            (84,  [(0, W, drawMemory, { [weak self] in self?.showDetail(.memory) })]),
+            (118, [(0, half, drawStorage, { [weak self] in self?.showDetail(.storage) }), (half + g, half, drawBattery, { [weak self] in self?.showDetail(.battery) })]),
+            (96,  [(0, W, drawNetwork, { [weak self] in self?.showDetail(.network) })]),
+        ], button: { [weak self] card, w in
+            guard let self else { return }
+            let b = NSButton(image: NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")!,
+                             target: self, action: #selector(self.settingsClicked(_:)))
+            b.isBordered = false
+            b.contentTintColor = .labelColor
+            b.frame = NSRect(x: w - 38, y: 16, width: 24, height: 24)
+            card.addSubview(b)
+        })
+        cards = mainPage.cards
         let vc = NSViewController()
-        vc.view = root
+        vc.view = mainPage.view
         popover.contentViewController = vc
-        popover.contentSize = size
+        popover.contentSize = mainPage.size
+    }
+
+    // MARK: 详情页（每张卡片都能点进去）
+    static let procRows = 10
+    let detail = DetailProvider()
+    private var detailKind: DetailKind = .memory
+    private var detailPages: [String: Page] = [:]
+    private var detailTimer: Timer?
+    private var kvRows: [(String, String)] = []
+
+    func debugShow(_ k: DetailKind) { showDetail(k) }
+
+    private func key(_ k: DetailKind) -> String { "\(k)" }
+
+    private func showDetail(_ k: DetailKind) {
+        detailKind = k
+        detail.reset()
+        refreshDetail()
+        let W = Self.width
+        let dynamic = k == .storage || k == .temps || k == .system || k == .battery || k == .network   // 高度随数据条数变化，不缓存
+        let page = (dynamic ? nil : detailPages[key(k)]) ?? {
+            let header: (CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)]) = (56, [(0, W, drawDetailHeader, nil)])
+            var rows = [header]
+            switch k {
+            case .system, .battery: rows.append((CGFloat(max(1, kvRows.count)) * 24 + 14, [(0, W, drawKV, nil)]))
+            case .cpu:     rows += [(132, [(0, W, drawCores, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("占用 CPU 最多的应用", "Top apps by CPU"), self?.detail.cpuApps ?? [], { String(format: "%.1f%%", $0 * 100) }) }, nil)])]
+            case .gpu:     rows += [(4 * 24 + 46, [(0, W, drawGPUStats, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("占用 GPU 最多的应用", "Top apps by GPU"), self?.detail.gpuApps ?? [], { String(format: "%.1f%%", $0 * 100) }) }, nil)])]
+            case .memory:  rows.append((CGFloat(Self.procRows) * 30 + 44, [(0, W, drawProcessList, nil)]))
+            case .temps:   rows.append((CGFloat(max(1, min(14, (detail.sensors.count + 1) / 2))) * 22 + 24, [(0, W, drawSensors, nil)]))
+            case .storage: rows.append((CGFloat(max(1, detail.volumes.count)) * 46 + 14, [(0, W, drawVolumes, nil)]))
+            case .network: rows += [(CGFloat(max(1, detail.interfaces.count)) * 40 + 40, [(0, W, drawInterfaces, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("网络流量最大的应用", "Top apps by network"), self?.detail.netApps ?? [], { NetMonitor.format($0) }) }, nil)])]
+            }
+            let p = makePage(rows, button: { [weak self] card, _ in
+                guard let self else { return }
+                let b = NSButton(image: NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
+                                 target: self, action: #selector(self.backToMain))
+                b.isBordered = false
+                b.contentTintColor = .labelColor
+                b.frame = NSRect(x: 10, y: 16, width: 24, height: 24)
+                card.addSubview(b)
+            })
+            detailPages[key(k)] = p
+            return p
+        }()
+        switchTo(page)
+        detailTimer?.invalidate()
+        let interval: Double = (k == .memory || k == .storage || k == .system) ? 2 : 1.5
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.refreshDetail() }
+        RunLoop.main.add(t, forMode: .common)
+        detailTimer = t
+    }
+
+    private func refreshDetail() {
+        detail.refresh(detailKind)
+        switch detailKind {
+        case .system:  kvRows = SystemDetail.rows(spec)
+        case .battery: kvRows = BatteryDetail.rows()
+        default: break
+        }
+    }
+
+    @objc private func backToMain() {
+        detailTimer?.invalidate(); detailTimer = nil
+        detail.stopNetwork()
+        switchTo(mainPage)
+    }
+
+    private var detailTitle: (icon: String, tint: NSColor, title: String, value: String, sub: String) {
+        let m = model
+        switch detailKind {
+        case .system:  return ("laptopcomputer", .labelColor, spec.model, "", spec.summary)
+        case .cpu:     return ("cpu", .systemBlue, "CPU", Draw.pct(m.v("cpu")), spec.detail.components(separatedBy: " · ").first ?? "")
+        case .gpu:     return ("cpu.fill", .systemGreen, "GPU", m.gpu == nil ? "--" : Draw.pct(m.v("gpu")), spec.gpuCores > 0 ? L("\(spec.gpuCores) 核 GPU", "\(spec.gpuCores)-core GPU") : "")
+        case .memory:  return ("memorychip", .systemPurple, L("内存占用", "Memory Usage"), "\(SystemInfo.gb(m.memory.used)) / \(SystemInfo.gb(m.memory.total))", L("按应用汇总", "Grouped by app"))
+        case .temps:   return ("thermometer.medium", .systemOrange, L("温度传感器", "Temperature Sensors"), m.temps.soc.map { TempUnit.format($0) } ?? "--", L("\(detail.sensors.count) 个传感器", "\(detail.sensors.count) sensors"))
+        case .storage: return ("internaldrive", .systemIndigo, L("存储", "Storage"), m.storage.map { Draw.pct($0.used / $0.total) } ?? "--", L("已挂载的卷", "Mounted volumes"))
+        case .battery: return ("battery.100", .systemGreen, L("电池", "Battery"), m.battery.map { "\($0.percent)%" } ?? "--", m.battery.map { SystemInfo.stateText($0.state) } ?? "")
+        case .network: return ("network", .systemTeal, L("网络", "Network"), "↓ " + NetMonitor.format(m.v("down")), "↑ " + NetMonitor.format(m.v("up")))
+        }
+    }
+
+    private func drawDetailHeader(_ w: CGFloat) {
+        let h = detailTitle
+        Draw.symbol(h.icon, NSPoint(x: 40, y: 10), size: 15, color: h.tint)
+        Draw.text(h.title, NSPoint(x: 64, y: 8), size: 13, weight: .semibold)
+        Draw.text(h.sub, NSPoint(x: 64, y: 29), size: 10, color: .glassSecondary)
+        Draw.text(h.value, NSPoint(x: w - 14, y: 12), size: 15, weight: .semibold, right: true, mono: true)
+    }
+
+    private func sectionTitle(_ s: String) { Draw.text(s, NSPoint(x: 14, y: 12), size: 11, weight: .semibold, color: .glassSecondary) }
+
+    private func drawKV(_ w: CGFloat) {
+        var y: CGFloat = 12
+        for (k, v) in kvRows {
+            Draw.text(k, NSPoint(x: 14, y: y), size: 11, color: .glassSecondary)
+            Draw.text(v, NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true)
+            y += 24
+        }
+    }
+
+    private func drawCores(_ w: CGFloat) {
+        sectionTitle(L("每个核心", "Per core"))
+        let cores = detail.cores
+        guard !cores.isEmpty else { Draw.text(L("采样中…", "Sampling…"), NSPoint(x: 14, y: 40), size: 11, color: .glassTertiary); return }
+        let e = spec.eCores, n = cores.count
+        let gap: CGFloat = 6, bw = (w - 28 - gap * CGFloat(n - 1)) / CGFloat(n)
+        let top: CGFloat = 36, h: CGFloat = 64
+        for (i, v) in cores.enumerated() {
+            let x = 14 + CGFloat(i) * (bw + gap)
+            NSColor.labelColor.withAlphaComponent(0.12).setFill()
+            NSBezierPath(roundedRect: NSRect(x: x, y: top, width: bw, height: h), xRadius: 4, yRadius: 4).fill()
+            let isE = i < e
+            (isE ? NSColor.systemTeal : NSColor.systemBlue).setFill()
+            let fh = max(3, h * CGFloat(min(v, 1)))
+            NSBezierPath(roundedRect: NSRect(x: x, y: top + h - fh, width: bw, height: fh), xRadius: 4, yRadius: 4).fill()
+            let label = isE ? "E\(i + 1)" : "P\(i - e + 1)"
+            let ls = NSAttributedString(string: label, attributes: [.font: NSFont.systemFont(ofSize: 9, weight: .medium), .foregroundColor: NSColor.glassSecondary])
+            ls.draw(at: NSPoint(x: x + (bw - ls.size().width) / 2, y: top + h + 4))
+            let vs = NSAttributedString(string: "\(Int(v * 100))", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .regular), .foregroundColor: NSColor.glassTertiary])
+            vs.draw(at: NSPoint(x: x + (bw - vs.size().width) / 2, y: top + h + 16))
+        }
+    }
+
+    private func drawApps(_ w: CGFloat, _ title: String, _ apps: [AppStat], _ fmt: (Double) -> String) {
+        sectionTitle(title)
+        guard !apps.isEmpty else {
+            let hint = detailKind == .network ? L("采样中…（约 2 秒）", "Sampling… (about 2 s)") : L("采样中…", "Sampling…")
+            Draw.text(hint, NSPoint(x: 14, y: 40), size: 11, color: .glassTertiary); return
+        }
+        let maxV = max(apps.first?.value ?? 1, 0.0001)
+        var y: CGFloat = 36
+        for a in apps {
+            ProcessMemory.icon(a.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            Draw.text(a.processes > 1 ? "\(a.name)  ×\(a.processes)" : a.name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium)
+            Draw.text(fmt(a.value), NSPoint(x: w - 14, y: y + 1), size: 12, weight: .medium, right: true, mono: true)
+            Draw.bar(NSRect(x: 42, y: y + 20, width: w - 56, height: 3), a.value / maxV, .systemBlue)
+            y += 30
+        }
+    }
+
+    private func drawGPUStats(_ w: CGFloat) {
+        sectionTitle(L("利用率", "Utilization"))
+        var y: CGFloat = 36
+        for (k, label) in [("Device Utilization %", L("设备", "Device")), ("Renderer Utilization %", L("渲染器", "Renderer")), ("Tiler Utilization %", "Tiler")] {
+            let v = Double(detail.gpuStats[k] ?? 0) / 100
+            Draw.text(label, NSPoint(x: 14, y: y), size: 11, color: .glassSecondary)
+            Draw.text(Draw.pct(v), NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true, mono: true)
+            Draw.bar(NSRect(x: 90, y: y + 6, width: w - 150, height: 5), v, .systemGreen)
+            y += 24
+        }
+        let mem = Double(detail.gpuStats["In use system memory"] ?? 0)
+        Draw.text(L("显存（共享内存）", "GPU memory (shared)"), NSPoint(x: 14, y: y), size: 11, color: .glassSecondary)
+        Draw.text(SystemInfo.gb(mem), NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true, mono: true)
+    }
+
+    private func drawSensors(_ w: CGFloat) {
+        let s = detail.sensors
+        guard !s.isEmpty else { Draw.text(L("读取不到温度传感器", "No temperature sensors available"), NSPoint(x: 14, y: 14), size: 11, color: .glassTertiary); return }
+        let colW = (w - 28 - 16) / 2, perCol = 14
+        for (i, (name, v)) in s.prefix(perCol * 2).enumerated() {
+            let x = 14 + CGFloat(i / perCol) * (colW + 16), y = 12 + CGFloat(i % perCol) * 22
+            Draw.text(name, NSPoint(x: x, y: y), size: 10, color: .glassSecondary)
+            Draw.text(TempUnit.format(v), NSPoint(x: x + colW, y: y), size: 10, weight: .medium, color: Draw.tempColor(v), right: true, mono: true)
+        }
+    }
+
+    private func drawVolumes(_ w: CGFloat) {
+        var y: CGFloat = 12
+        for v in detail.volumes {
+            ProcessMemory.icon(v.path).draw(in: NSRect(x: 14, y: y, width: 24, height: 24), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            Draw.text(v.name, NSPoint(x: 46, y: y), size: 12, weight: .medium)
+            Draw.text("\(SystemInfo.gb(v.used)) / \(SystemInfo.gb(v.total))", NSPoint(x: w - 14, y: y), size: 11, color: .glassSecondary, right: true, mono: true)
+            let f = v.used / v.total
+            Draw.bar(NSRect(x: 46, y: y + 22, width: w - 60, height: 5), f, Draw.level(f))
+            y += 46
+        }
+    }
+
+    private func drawInterfaces(_ w: CGFloat) {
+        sectionTitle(L("网络接口", "Interfaces"))
+        guard !detail.interfaces.isEmpty else { Draw.text(L("未连接", "Not connected"), NSPoint(x: 14, y: 40), size: 11, color: .glassTertiary); return }
+        var y: CGFloat = 36
+        for i in detail.interfaces {
+            Draw.text("\(i.name)  (\(i.bsd))", NSPoint(x: 14, y: y), size: 12, weight: .medium)
+            Draw.text(i.ipv4, NSPoint(x: w - 14, y: y), size: 11, color: .glassSecondary, right: true, mono: true)
+            Draw.text("↑ " + NetMonitor.format(i.up), NSPoint(x: 14, y: y + 17), size: 10, color: .systemPink, mono: true)
+            Draw.text("↓ " + NetMonitor.format(i.down), NSPoint(x: 120, y: y + 17), size: 10, color: .systemTeal, mono: true)
+            y += 40
+        }
+    }
+
+    private func switchTo(_ page: Page) {
+        popover.contentViewController?.view = page.view
+        popover.contentSize = page.size
+        cards = page.cards
+        cards.forEach { $0.window?.invalidateCursorRects(for: $0) }
+    }
+
+    private func drawProcessList(_ w: CGFloat) {
+        let total = Double(model.memory.total)
+        let procs = detail.memApps
+        let maxBytes = Double(procs.first?.bytes ?? 1)
+        var y: CGFloat = 12
+        for p in procs {
+            ProcessMemory.icon(p.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver,
+                                            fraction: 1, respectFlipped: true, hints: nil)
+            let name = p.processes > 1 ? "\(p.name)  ×\(p.processes)" : p.name
+            Draw.text(name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium)
+            Draw.text(ProcessMemory.format(p.bytes), NSPoint(x: w - 14, y: y + 1), size: 12, weight: .medium, right: true, mono: true)
+            let f = Double(p.bytes) / maxBytes
+            Draw.bar(NSRect(x: 42, y: y + 20, width: w - 56, height: 3), f,
+                     Double(p.bytes) / total > 0.15 ? .systemOrange : .systemPurple)
+            y += 30
+        }
+        Draw.text(L("系统进程（root）无权限读取，未计入", "System (root) processes are not readable and not listed"),
+                  NSPoint(x: 14, y: y + 6), size: 9, color: .glassTertiary)
     }
 
     @objc private func settingsClicked(_ sender: NSButton) { onSettings(sender) }
@@ -738,7 +1356,11 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     func hide() { popover.performClose(nil) }
 
-    func popoverDidClose(_ notification: Notification) { timer?.invalidate(); timer = nil; onVisibilityChange(false) }
+    func popoverDidClose(_ notification: Notification) {
+        timer?.invalidate(); timer = nil
+        if cards.first !== mainPage.cards.first { backToMain() }
+        onVisibilityChange(false)
+    }
 
     private func startTimer() {
         timer?.invalidate()
@@ -907,7 +1529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let cpu = CPUMonitor()
     private let netMon = NetMonitor()
-    private let tempMon = TempMonitor()
+    private let tempMon = TempMonitor.shared
     private let model = StatsModel()
     private lazy var panel = PanelController(model: model)
     private var runner = Runner.all.first { $0.id == UserDefaults.standard.string(forKey: "runner") } ?? Runner.cat
@@ -963,11 +1585,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 self.panel.show(below: button)
                 NSLog("panel debug: shown=%d", self.panel.isVisible ? 1 : 0)
+                if let i = CommandLine.arguments.firstIndex(of: "--detail"), i + 1 < CommandLine.arguments.count {
+                    let map: [String: DetailKind] = ["system": .system, "cpu": .cpu, "gpu": .gpu, "memory": .memory, "temps": .temps,
+                                                     "storage": .storage, "battery": .battery, "network": .network]
+                    if let k = map[CommandLine.arguments[i + 1]] { self.panel.debugShow(k) }
+                }
             }
         }
     }
 
     /// 面板打开时 0.5 秒采样一次（接近实时，中间由 60fps 动画补间），关闭时 1.5 秒一次省电
+    func applicationWillTerminate(_ n: Notification) { panel.detail.stopNetwork() }   // 退出时结束 nettop
+
     private func startSampling(interval: Double) {
         StatsModel.interval = interval
         sampleTimer?.invalidate()
@@ -1267,6 +1896,7 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--stats" {
     print("temps soc", t.soc.map { String(format: "%.1f", $0) } ?? "nil", "battery", t.battery.map { String(format: "%.1f", $0) } ?? "nil",
           "ssd", t.ssd.map { String(format: "%.1f", $0) } ?? "nil")
     print("network up", NetMonitor.format(nr.up), "down", NetMonitor.format(nr.down))
+    for a in ProcessMemory.top(10) { print("  mem", ProcessMemory.format(a.bytes), "×\(a.processes)", a.name) }
     exit(0)
 }
 
