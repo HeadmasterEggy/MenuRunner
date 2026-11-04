@@ -505,6 +505,64 @@ enum TempUnit {
     }
 }
 
+// MARK: - 各应用内存占用（与活动监视器“内存”列同口径：phys_footprint）
+struct AppMemory { var name: String, path: String?, bytes: UInt64, processes: Int }
+
+enum ProcessMemory {
+    /// 按应用汇总（同一 .app 下的 Helper 进程合并），从大到小
+    static func top(_ limit: Int) -> [AppMemory] {
+        let n = proc_listallpids(nil, 0)
+        guard n > 0 else { return [] }
+        var pids = [pid_t](repeating: 0, count: Int(n) * 2)
+        let got = proc_listallpids(&pids, Int32(MemoryLayout<pid_t>.size * pids.count))
+        var groups: [String: AppMemory] = [:]
+        var pathBuf = [CChar](repeating: 0, count: 4096)
+        for pid in pids.prefix(Int(max(got, 0))) where pid > 0 {
+            var usage = rusage_info_current()
+            let r = withUnsafeMutablePointer(to: &usage) {
+                $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, $0) }
+            }
+            guard r == 0, usage.ri_phys_footprint > 0 else { continue }   // 无权限（root 进程）时跳过
+            let len = proc_pidpath(pid, &pathBuf, UInt32(pathBuf.count))
+            let path = len > 0 ? String(cString: pathBuf) : ""
+            var key: String, name: String, appPath: String?
+            if let range = path.range(of: ".app/") {                       // 取最外层 .app
+                appPath = String(path[..<range.lowerBound]) + ".app"
+                key = appPath!
+                name = (appPath! as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: "")
+            } else {
+                name = (path as NSString).lastPathComponent               // 完整文件名（proc_name 会截断）
+                if name.isEmpty {
+                    var nameBuf = [CChar](repeating: 0, count: 256)
+                    proc_name(pid, &nameBuf, UInt32(nameBuf.count))
+                    name = String(cString: nameBuf)
+                }
+                key = path.isEmpty ? name : path
+            }
+            var g = groups[key] ?? AppMemory(name: name, path: appPath, bytes: 0, processes: 0)
+            g.bytes += usage.ri_phys_footprint
+            g.processes += 1
+            groups[key] = g
+        }
+        return Array(groups.values.sorted { $0.bytes > $1.bytes }.prefix(limit))
+    }
+
+    static func format(_ b: UInt64) -> String {
+        let d = Double(b)
+        return d >= 1_073_741_824 ? String(format: "%.2f GB", d / 1_073_741_824) : String(format: "%.0f MB", d / 1_048_576)
+    }
+
+    private static var iconCache: [String: NSImage] = [:]
+    static func icon(_ path: String?) -> NSImage {
+        let key = path ?? ""
+        if let i = iconCache[key] { return i }
+        let img = path.map { NSWorkspace.shared.icon(forFile: $0) }
+            ?? NSImage(systemSymbolName: "gearshape.2", accessibilityDescription: nil)!
+        iconCache[key] = img
+        return img
+    }
+}
+
 // MARK: - 数据模型：目标值 + 带缓动的显示值（动态效果）
 final class StatsModel {
     static var interval = 1.5
@@ -648,6 +706,10 @@ enum Draw {
 // MARK: - 卡片：一块液态玻璃 + 自绘内容
 final class CardView: NSView {
     var drawer: (CGFloat) -> Void = { _ in }
+    var onClick: (() -> Void)?
+    override func mouseUp(with event: NSEvent) { onClick?() }
+    override func resetCursorRects() { if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) } }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var isFlipped: Bool { true }
     static var drawCount = 0
     override func draw(_ dirtyRect: NSRect) { CardView.drawCount += 1; drawer(bounds.width) }
@@ -674,30 +736,30 @@ final class PanelController: NSObject, NSPopoverDelegate {
         build()
     }
 
-    private func build() {
-        let W = Self.width, g = Self.gap, half = (W - g) / 2
-        var layout: [(CGFloat, CGFloat, CGFloat, CGFloat, (CGFloat) -> Void)] = []
+    private struct Page { let view: NSView; let size: NSSize; let cards: [CardView] }
+    private var mainPage: Page!
+    private var detailPage: Page?
+    private var procs: [AppMemory] = []
+    private var procTimer: Timer?
+
+    /// 通用页面：rows = [(高度, [(x, 宽, 绘制, 点击)])]；底层玻璃、上层内容
+    private func makePage(_ rows: [(CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)])], button: ((CardView, CGFloat) -> Void)? = nil) -> Page {
+        let W = Self.width, g = Self.gap, M = Self.margin
+        var layout: [(CGFloat, CGFloat, CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)] = []
         var y: CGFloat = 0
-        func add(_ h: CGFloat, _ items: [(CGFloat, CGFloat, (CGFloat) -> Void)]) {
-            for (x, w, d) in items { layout.append((x, y, w, h, d)) }
+        for (h, items) in rows {
+            for (x, w, d, c) in items { layout.append((x, y, w, h, d, c)) }
             y += h + g
         }
-        add(56,  [(0, W, drawHeader)])
-        add(134, [(0, W, drawCPU)])
-        add(118, [(0, half, drawGPU), (half + g, half, drawTemps)])
-        add(84,  [(0, W, drawMemory)])
-        add(118, [(0, half, drawStorage), (half + g, half, drawBattery)])
-        add(96,  [(0, W, drawNetwork)])
-        let H = y - g, M = Self.margin
-
+        let H = y - g
         let size = NSSize(width: W + M * 2, height: H + M * 2)
-        // 底层：玻璃容器（只放玻璃）；上层：内容（不经过玻璃，避免被折射模糊）
         let root = NSView(frame: NSRect(origin: .zero, size: size))
         let container = NSGlassEffectContainerView(frame: root.bounds)
         container.spacing = g
         let glassHolder = NSView(frame: root.bounds)
         let contentLayer = NSView(frame: root.bounds)
-        for (x, top, w, h, d) in layout {
+        var cards: [CardView] = []
+        for (i, (x, top, w, h, d, click)) in layout.enumerated() {
             let frame = NSRect(x: M + x, y: M + H - top - h, width: w, height: h)
             let glass = NSGlassEffectView(frame: frame)
             glass.cornerRadius = 18
@@ -705,24 +767,111 @@ final class PanelController: NSObject, NSPopoverDelegate {
             glassHolder.addSubview(glass)
             let card = CardView(frame: frame)
             card.drawer = d
+            card.onClick = click
             contentLayer.addSubview(card)
             cards.append(card)
-            if h == 56 {   // 标题栏里的设置按钮
-                let b = NSButton(image: NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")!,
-                                 target: self, action: #selector(settingsClicked(_:)))
-                b.isBordered = false
-                b.contentTintColor = .labelColor
-                b.frame = NSRect(x: w - 38, y: 16, width: 24, height: 24)
-                card.addSubview(b)
-            }
+            if i == 0 { button?(card, w) }       // 第一张卡片（标题栏）里的按钮
         }
         container.contentView = glassHolder
         root.addSubview(container)
         root.addSubview(contentLayer)
+        return Page(view: root, size: size, cards: cards)
+    }
+
+    private func build() {
+        let W = Self.width, g = Self.gap, half = (W - g) / 2
+        mainPage = makePage([
+            (56,  [(0, W, drawHeader, nil)]),
+            (134, [(0, W, drawCPU, nil)]),
+            (118, [(0, half, drawGPU, nil), (half + g, half, drawTemps, nil)]),
+            (84,  [(0, W, drawMemory, { [weak self] in self?.showMemoryDetail() })]),
+            (118, [(0, half, drawStorage, nil), (half + g, half, drawBattery, nil)]),
+            (96,  [(0, W, drawNetwork, nil)]),
+        ], button: { [weak self] card, w in
+            guard let self else { return }
+            let b = NSButton(image: NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")!,
+                             target: self, action: #selector(self.settingsClicked(_:)))
+            b.isBordered = false
+            b.contentTintColor = .labelColor
+            b.frame = NSRect(x: w - 38, y: 16, width: 24, height: 24)
+            card.addSubview(b)
+        })
+        cards = mainPage.cards
         let vc = NSViewController()
-        vc.view = root
+        vc.view = mainPage.view
         popover.contentViewController = vc
-        popover.contentSize = size
+        popover.contentSize = mainPage.size
+    }
+
+    // MARK: 内存详情页
+    static let procRows = 10
+
+    private func showMemoryDetail() {
+        procs = ProcessMemory.top(Self.procRows)
+        if detailPage == nil {
+            let W = Self.width
+            detailPage = makePage([
+                (56, [(0, W, drawMemoryDetailHeader, nil)]),
+                (CGFloat(Self.procRows) * 30 + 44, [(0, W, drawProcessList, nil)]),
+            ], button: { [weak self] card, _ in
+                guard let self else { return }
+                let b = NSButton(image: NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
+                                 target: self, action: #selector(self.backToMain))
+                b.isBordered = false
+                b.contentTintColor = .labelColor
+                b.frame = NSRect(x: 10, y: 16, width: 24, height: 24)
+                card.addSubview(b)
+            })
+        }
+        guard let page = detailPage else { return }
+        switchTo(page)
+        procTimer?.invalidate()
+        let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.procs = ProcessMemory.top(Self.procRows) }
+        RunLoop.main.add(t, forMode: .common)
+        procTimer = t
+    }
+
+    func debugShowMemory() { showMemoryDetail() }
+
+    @objc private func backToMain() {
+        procTimer?.invalidate(); procTimer = nil
+        switchTo(mainPage)
+    }
+
+    private func switchTo(_ page: Page) {
+        popover.contentViewController?.view = page.view
+        popover.contentSize = page.size
+        cards = page.cards
+        cards.forEach { $0.window?.invalidateCursorRects(for: $0) }
+    }
+
+    private func drawMemoryDetailHeader(_ w: CGFloat) {
+        let m = model
+        Draw.symbol("memorychip", NSPoint(x: 40, y: 10), size: 15, color: .systemPurple)
+        Draw.text(L("内存占用", "Memory Usage"), NSPoint(x: 64, y: 8), size: 13, weight: .semibold)
+        Draw.text(L("按应用汇总 · 每 2 秒刷新", "Grouped by app · refreshes every 2s"), NSPoint(x: 64, y: 29), size: 10, color: .glassSecondary)
+        Draw.text("\(SystemInfo.gb(m.memory.used)) / \(SystemInfo.gb(m.memory.total))", NSPoint(x: w - 14, y: 10),
+                  size: 13, weight: .semibold, right: true, mono: true)
+        Draw.text(Draw.pct(m.memory.used / m.memory.total), NSPoint(x: w - 14, y: 29), size: 10, color: .glassSecondary, right: true, mono: true)
+    }
+
+    private func drawProcessList(_ w: CGFloat) {
+        let total = Double(model.memory.total)
+        let maxBytes = Double(procs.first?.bytes ?? 1)
+        var y: CGFloat = 12
+        for p in procs {
+            ProcessMemory.icon(p.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver,
+                                            fraction: 1, respectFlipped: true, hints: nil)
+            let name = p.processes > 1 ? "\(p.name)  ×\(p.processes)" : p.name
+            Draw.text(name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium)
+            Draw.text(ProcessMemory.format(p.bytes), NSPoint(x: w - 14, y: y + 1), size: 12, weight: .medium, right: true, mono: true)
+            let f = Double(p.bytes) / maxBytes
+            Draw.bar(NSRect(x: 42, y: y + 20, width: w - 56, height: 3), f,
+                     Double(p.bytes) / total > 0.15 ? .systemOrange : .systemPurple)
+            y += 30
+        }
+        Draw.text(L("系统进程（root）无权限读取，未计入", "System (root) processes are not readable and not listed"),
+                  NSPoint(x: 14, y: y + 6), size: 9, color: .glassTertiary)
     }
 
     @objc private func settingsClicked(_ sender: NSButton) { onSettings(sender) }
@@ -738,7 +887,11 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     func hide() { popover.performClose(nil) }
 
-    func popoverDidClose(_ notification: Notification) { timer?.invalidate(); timer = nil; onVisibilityChange(false) }
+    func popoverDidClose(_ notification: Notification) {
+        timer?.invalidate(); timer = nil
+        if detailPage != nil, cards.first !== mainPage.cards.first { backToMain() }
+        onVisibilityChange(false)
+    }
 
     private func startTimer() {
         timer?.invalidate()
@@ -814,6 +967,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private func drawMemory(_ w: CGFloat) {
         let m = model
         Draw.title("memorychip", L("内存", "Memory"), in: w, tint: .systemPurple)
+        let tw = 40 + NSAttributedString(string: L("内存", "Memory"), attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).size().width
+        Draw.symbol("chevron.right", NSPoint(x: tw + 4, y: 12), size: 9, color: .glassTertiary)
         Draw.text("\(SystemInfo.gb(m.v("memUsed"))) / \(SystemInfo.gb(m.memory.total))  \(Draw.pct(m.v("mem")))",
                   NSPoint(x: w - 14, y: 13), size: 11, color: .glassSecondary, right: true, mono: true)
         let bar = NSRect(x: 14, y: 40, width: w - 28, height: 10)
@@ -963,6 +1118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 self.panel.show(below: button)
                 NSLog("panel debug: shown=%d", self.panel.isVisible ? 1 : 0)
+                if CommandLine.arguments.contains("--memory") { self.panel.debugShowMemory() }
             }
         }
     }
@@ -1267,6 +1423,7 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--stats" {
     print("temps soc", t.soc.map { String(format: "%.1f", $0) } ?? "nil", "battery", t.battery.map { String(format: "%.1f", $0) } ?? "nil",
           "ssd", t.ssd.map { String(format: "%.1f", $0) } ?? "nil")
     print("network up", NetMonitor.format(nr.up), "down", NetMonitor.format(nr.down))
+    for a in ProcessMemory.top(10) { print("  mem", ProcessMemory.format(a.bytes), "×\(a.processes)", a.name) }
     exit(0)
 }
 

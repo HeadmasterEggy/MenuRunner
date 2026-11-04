@@ -11,7 +11,7 @@
 ![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-555?style=flat-square)
 
-<img src="docs/panel.png" width="320" alt="Panel">&nbsp;&nbsp;<img src="docs/settings.png" width="210" alt="Settings">
+<img src="docs/panel.png" width="300" alt="Panel">&nbsp;&nbsp;<img src="docs/memory.png" width="300" alt="Memory usage by app">&nbsp;&nbsp;<img src="docs/settings.png" width="200" alt="Settings">
 
 <img src="docs/runners.png" alt="Runners">
 
@@ -24,7 +24,7 @@
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
   - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version
   - CPU (System / User / Idle) and GPU history charts
-  - Memory breakdown (App / Wired / Compressed)
+  - Memory breakdown (App / Wired / Compressed) — click the card to see which apps use the most memory
   - Storage ring, battery level, health and cycle count
   - Temperatures — SoC, battery, SSD
   - Network upload / download speed

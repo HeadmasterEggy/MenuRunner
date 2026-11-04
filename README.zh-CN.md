@@ -11,7 +11,7 @@
 ![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-555?style=flat-square)
 
-<img src="docs/panel.png" width="320" alt="面板">&nbsp;&nbsp;<img src="docs/settings.png" width="210" alt="设置">
+<img src="docs/panel.png" width="300" alt="面板">&nbsp;&nbsp;<img src="docs/memory.png" width="300" alt="按应用查看内存">&nbsp;&nbsp;<img src="docs/settings.png" width="200" alt="设置">
 
 <img src="docs/runners.png" alt="Runner">
 
@@ -24,7 +24,7 @@
 - **液态玻璃面板**（`NSPopover` + `NSGlassEffectView`），60fps 动画：
   - 本机配置：机型、芯片、CPU / GPU 核心数、内存、硬盘、系统版本
   - CPU（System / User / Idle）和 GPU 历史曲线
-  - 内存细分（App / 联动 / 压缩）
+  - 内存细分（App / 联动 / 压缩），点击卡片查看哪些应用占用内存最多
   - 存储环形图、电量、电池健康度、循环次数
   - 温度：芯片、电池、SSD
   - 网络上传 / 下载速度
