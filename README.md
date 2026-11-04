@@ -15,13 +15,15 @@
 
 <img src="docs/settings.png" width="200" alt="Settings">
 
+<img src="docs/rocket.png" width="640" alt="Rocket Cat">
+
 <img src="docs/runners.png" alt="Runners">
 
 </div>
 
 ## Features
 
-- **Runners** — a galloping cat, a steaming coffee cup a rainbow cat (our cat flying with a waving rainbow trail and twinkling stars) and a monochrome pixel cat with a stepped stripe trail — all original designs, drawn in code as template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
+- **Runners** — a galloping cat, a steaming coffee cup a rainbow cat (our cat flying with a waving rainbow trail and twinkling stars) a monochrome pixel cat with a stepped stripe trail, and a colour pixel-art Rocket Cat (an orange tabby riding a rocket with a flickering flame) — all original designs, drawn in code as template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
 - **Menu bar metrics with live mini graphs** — CPU, GPU, memory, battery, network, SoC or battery temperature. Choose *Graph + Number*, *Graph only* or *Number only*.
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
   - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version

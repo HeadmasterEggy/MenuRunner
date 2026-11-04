@@ -256,7 +256,90 @@ struct Runner {
         }
     }
 
-    static let all: [Runner] = [cat, coffee, rainbow, pixelCat]
+    static let all: [Runner] = [cat, coffee, rainbow, pixelCat, rocketCat]
+
+    // 橘猫火箭（原创彩色像素画）：橘猫骑着小火箭，尾焰闪烁，星星一闪一闪
+    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 6, size: NSSize(width: 36, height: 20), template: false) { t in
+        let W = 36, H = 20
+        let f = Int((t / (2 * .pi) * 6).rounded()) % 6
+        func c(_ r: Double, _ g: Double, _ b: Double) -> NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: 1) }
+        let orange = c(0.97, 0.60, 0.20), stripe = c(0.82, 0.40, 0.10), white = c(0.99, 0.97, 0.93)
+        let pink = c(0.99, 0.56, 0.66), eye = c(0.10, 0.09, 0.12), outline = c(0.16, 0.13, 0.18)
+        let hull = c(0.90, 0.92, 0.96), hullShade = c(0.66, 0.70, 0.79), red = c(0.92, 0.22, 0.24)
+        let glass = c(0.40, 0.74, 0.99), glassDark = c(0.16, 0.38, 0.74), nozzle = c(0.38, 0.38, 0.44)
+        let flameY = c(1.0, 0.90, 0.30), flameO = c(1.0, 0.56, 0.16), flameR = c(0.96, 0.27, 0.22)
+
+        var grid = [[NSColor?]](repeating: [NSColor?](repeating: nil, count: W), count: H)
+        let bob = f % 2 + 1                              // 整体上下颠簸 1 格（+1 给顶部描边留空间）
+        func set(_ x: Int, _ y: Int, _ col: NSColor) {
+            let yy = y + bob
+            if x >= 0 && x < W && yy >= 0 && yy < H { grid[yy][x] = col }
+        }
+        func rect(_ x0: Int, _ y0: Int, _ x1: Int, _ y1: Int, _ col: NSColor) {
+            for y in y0...y1 { for x in x0...x1 { set(x, y, col) } }
+        }
+
+        // —— 火箭（朝右）
+        rect(12, 10, 29, 14, hull)
+        rect(12, 14, 29, 14, hullShade)                  // 底部阴影
+        for (y, len) in [(10, 2), (11, 3), (12, 4), (13, 3), (14, 2)] { rect(30, y, 29 + len, y, red) }   // 尖头
+        rect(12, 7, 14, 9, red); set(15, 9, red)         // 上尾翼
+        rect(12, 15, 14, 16, red); set(15, 15, red)      // 下尾翼
+        rect(10, 11, 11, 13, nozzle)                     // 喷口
+        rect(24, 11, 26, 13, glassDark); set(25, 12, glass); set(24, 11, glass)   // 舷窗
+
+        // —— 橘猫（坐在火箭上，面朝右）
+        rect(16, 4, 22, 9, orange)                       // 身体
+        for x in [17, 19] { rect(x, 4, x, 6, stripe) }   // 条纹
+        rect(20, 6, 22, 9, white)                        // 肚皮
+        rect(21, 1, 27, 6, orange)                       // 头
+        set(21, 0, orange); set(22, 0, orange); set(26, 0, orange); set(27, 0, orange)   // 耳朵
+        set(22, 1, pink); set(26, 1, pink)               // 耳朵内侧
+        set(24, 1, stripe); set(24, 2, stripe)           // 额头条纹
+        set(23, 3, eye); set(26, 3, eye)                 // 眼睛
+        rect(23, 4, 26, 5, white)                        // 嘴巴
+        set(24, 4, pink)                                 // 鼻子
+        set(22, 4, pink); set(27, 4, pink)               // 腮红
+        rect(22, 9, 24, 9, white)                        // 前爪抱住火箭
+        // 尾巴：向后飘，随帧上下甩
+        let tailY = [5, 4, 4, 5, 6, 6][f]
+        set(15, 7, orange); set(14, tailY + 1, orange); set(13, tailY, orange); set(12, tailY, stripe)
+
+        // —— 自动描边：实心像素四周的空格画深色轮廓
+        let solid = grid.map { $0.map { $0 != nil } }
+        for y in 0..<H { for x in 0..<W where !solid[y][x] {
+            let n = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+            if n.contains(where: { $0.0 >= 0 && $0.0 < W && $0.1 >= 0 && $0.1 < H && solid[$0.1][$0.0] }) { grid[y][x] = outline }
+        } }
+
+        // —— 尾焰（不描边）：黄 → 橙 → 红，长度闪动
+        let len = [6, 8, 7, 9, 6, 8][f]
+        for (dy, short) in [(11, 2), (12, 0), (13, 2)] {
+            let l = len - short
+            for i in 0..<max(l, 0) {
+                let x = 9 - i
+                let col = i < l / 3 ? flameY : (i < l * 2 / 3 ? flameO : flameR)
+                if x >= 0 && grid[dy + bob][x] == nil { grid[dy + bob][x] = col }
+            }
+        }
+
+        // —— 画像素
+        let ctx = NSGraphicsContext.current!.cgContext
+        ctx.setShouldAntialias(false)
+        for y in 0..<H { for x in 0..<W { if let col = grid[y][x] { col.setFill(); NSRect(x: x, y: H - 1 - y, width: 1, height: 1).fill() } } }
+
+        // —— 星星：一闪一闪，亮时是十字
+        for (sx, sy, ph) in [(3, 3, 0), (32, 2, 2), (6, 18, 4), (34, 17, 1)] {
+            let phase = (f + ph) % 6
+            guard phase < 4 else { continue }
+            let col = NSColor(srgbRed: 1, green: 0.78, blue: 0.18, alpha: phase == 1 ? 1 : 0.75)   // 暖黄，浅色背景也看得见
+            col.setFill()
+            NSRect(x: sx, y: H - 1 - sy, width: 1, height: 1).fill()
+            if phase == 1 {
+                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] { NSRect(x: sx + dx, y: H - 1 - sy - dy, width: 1, height: 1).fill() }
+            }
+        }
+    }
 
     // 像素猫（原创像素格）：单色胖像素猫 + 深浅交替的像素条纹尾迹，模板图随菜单栏变色
     static let pixelCat = Runner(id: "pixel", name: "像素猫|Pixel Cat", frameCount: 6, size: NSSize(width: 34, height: 16)) { t in
@@ -2178,6 +2261,27 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--stats" {
           "ssd", t.ssd.map { String(format: "%.1f", $0) } ?? "nil")
     print("network up", NetMonitor.format(nr.up), "down", NetMonitor.format(nr.down))
     for a in ProcessMemory.top(10) { print("  mem", ProcessMemory.format(a.bytes), "×\(a.processes)", a.name) }
+    exit(0)
+}
+
+// MenuRunner --runner <id> out.png：单个 runner 放大 12 倍，上行深色背景、下行浅色背景
+if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "--runner",
+   let r = Runner.all.first(where: { $0.id == CommandLine.arguments[2] }) {
+    let sc: CGFloat = 12, fw = r.size.width * sc, fh = r.size.height * sc
+    let frames = r.frames()
+    let sheet = NSImage(size: NSSize(width: fw * CGFloat(frames.count), height: fh * 2), flipped: true) { _ in
+        for (row, bg) in [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.93, alpha: 1)].enumerated() {
+            bg.setFill(); NSRect(x: 0, y: CGFloat(row) * fh, width: fw * CGFloat(frames.count), height: fh).fill()
+            NSGraphicsContext.current?.imageInterpolation = .none
+            for (i, img) in frames.enumerated() {
+                img.draw(in: NSRect(x: CGFloat(i) * fw, y: CGFloat(row) * fh, width: fw, height: fh), from: .zero,
+                         operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            }
+        }
+        return true
+    }
+    let rep = NSBitmapImageRep(data: sheet.tiffRepresentation!)!
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[3]))
     exit(0)
 }
 
