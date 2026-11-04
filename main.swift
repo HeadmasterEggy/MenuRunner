@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import ServiceManagement
 import IOKit.ps
 import IOKit
@@ -2118,7 +2119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         guard let button = statusItem.button else { return }
-        button.image = frames[0]
+        button.image = NSImage(size: frames[0].size)   // 透明占位，runner 由 runLayer 播放
         button.imagePosition = .imageLeft
         button.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         button.target = self
@@ -2128,12 +2129,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildSettingsMenu()
         appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] b, _ in
             // 彩色 runner 的猫身颜色随深浅色变；只在深 / 浅真正切换时重画（这个通知会频繁触发）
-            guard let self, !self.runner.template else { return }
+            guard let self else { return }
             let dark = b.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             guard dark != self.lastDark else { return }
             self.lastDark = dark
             self.frames = self.runner.frames(appearance: b.effectiveAppearance)
+            self.installRunAnimation()                 // 单色 runner 重新上色（深色 → 白，浅色 → 黑）
         }
+        installRunAnimation()
         // 存储页要用的各应用大小：启动后在后台慢慢算好
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in self?.panel.detail.prewarmStorage() }
         panel.onSettings = { [weak self] v in self?.popSettings(from: v) }
@@ -2259,6 +2262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runner = r; frames = r.frames(appearance: statusItem.button?.effectiveAppearance); frameIndex = 0
             UserDefaults.standard.set(id, forKey: "runner")
             updateStatusImage()
+            installRunAnimation()
         case "barMetric":
             barMetric = id; UserDefaults.standard.set(id, forKey: "barMetric"); sample()
         case "barStyle":
@@ -2352,9 +2356,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: 菜单栏动态小图标（单色模板图，随深浅色菜单栏自动变色）
+    /// 按钮图片：runner 的位置留空（由 runLayer 播放动画），右侧可选的迷你图表。只在采样时更新，不再每帧更新
     private func updateStatusImage() {
         let rf = frames[frameIndex]
-        guard barStyle != "text", barMetric != "none" else { statusItem.button?.image = rf; return }
+        let placeholder = NSImage(size: rf.size)                 // 透明占位：保留宽度，runner 由图层画
+        guard barStyle != "text", barMetric != "none" else {
+            statusItem.button?.image = placeholder; layoutRunLayer(); return
+        }
         let gw: CGFloat
         switch barMetric {
         case "battery": gw = 22
@@ -2364,12 +2372,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let h = max(rf.size.height, 18)
         let size = NSSize(width: rf.size.width + 4 + gw, height: h)
         let img = NSImage(size: size, flipped: false) { [weak self] _ in
-            rf.draw(in: NSRect(x: 0, y: (h - rf.size.height) / 2, width: rf.size.width, height: rf.size.height))
             self?.drawMini(in: NSRect(x: rf.size.width + 4, y: (h - 14) / 2, width: gw, height: 14))
             return true
         }
         img.isTemplate = true
         statusItem.button?.image = img
+        layoutRunLayer()
+    }
+
+    // MARK: 图层动画：动画由系统渲染服务器播放，app 每帧不需要做任何事
+    // （之前每帧换按钮图片，macOS 每次都要重排菜单栏并把图标截图复制到每块显示器，占 ~1% CPU / 帧率）
+    private let runLayer = CALayer()
+    private var runFps: Double = 0
+
+    /// 单色 runner 按菜单栏深浅色上色；彩色 runner 原样
+    private func cgFrames() -> [CGImage] {
+        let appearance = statusItem.button?.effectiveAppearance ?? NSAppearance.currentDrawing()
+        return frames.compactMap { img in
+            let scale: CGFloat = 2, size = img.size
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                       bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                       colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            rep.size = size
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            NSGraphicsContext.current?.imageInterpolation = .none
+            img.draw(in: NSRect(origin: .zero, size: size))
+            if runner.template {
+                appearance.performAsCurrentDrawingAppearance {
+                    NSColor.labelColor.setFill()
+                    NSRect(origin: .zero, size: size).fill(using: .sourceAtop)
+                }
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            return rep.cgImage
+        }
+    }
+
+    private func installRunAnimation() {
+        guard let button = statusItem.button else { return }
+        if runLayer.superlayer == nil {
+            button.wantsLayer = true
+            runLayer.magnificationFilter = .nearest
+            runLayer.contentsGravity = .resize
+            button.layer?.addSublayer(runLayer)
+        }
+        let cg = cgFrames()
+        guard !cg.isEmpty else { return }
+        runLayer.removeAllAnimations()
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        runLayer.contents = cg[0]
+        CATransaction.commit()
+        let anim = CAKeyframeAnimation(keyPath: "contents")
+        anim.values = cg
+        anim.calculationMode = .discrete
+        anim.duration = Double(cg.count)          // 速率 1 = 每秒 1 帧；真实帧率由 layer.speed 控制
+        anim.repeatCount = .infinity
+        runLayer.beginTime = 0; runLayer.timeOffset = 0
+        runLayer.add(anim, forKey: "run")
+        if runFps > 0 { setRunSpeed(runFps, force: true) }
+        layoutRunLayer()
+    }
+
+    /// 改变播放速率而不跳帧：把当前进度记进 timeOffset 再换速度
+    private func setRunSpeed(_ fps: Double, force: Bool = false) {
+        guard force || abs(fps - runFps) > 0.05 else { return }
+        runFps = fps
+        let now = CACurrentMediaTime()
+        let local = runLayer.convertTime(now, from: nil)
+        runLayer.speed = Float(fps)
+        runLayer.timeOffset = local
+        runLayer.beginTime = now
+    }
+
+    /// 让图层对准按钮里图片（占位）所在的位置
+    private func layoutRunLayer() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let b = self.statusItem.button, let cell = b.cell as? NSButtonCell else { return }
+            let r = cell.imageRect(forBounds: b.bounds)
+            let size = self.frames.first?.size ?? .zero
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            self.runLayer.frame = CGRect(x: r.minX, y: r.midY - size.height / 2, width: size.width, height: size.height)
+            CATransaction.commit()
+        }
     }
 
     private func drawMini(in r: NSRect) {
@@ -2447,20 +2532,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// CPU 越高跑得越快：0% → 4 帧/秒，100% → 40 帧/秒（指数变化）
     private func scheduleAnimation() {
-        // 跟随占用率，按“倍数”变化（人眼感知速度看的是快了几倍）：占用每增加 30%，速度翻倍
-        // 0% → 4，50% → 13，70% → 20，100% → 40 帧/秒
+        // 跟随占用率，按“倍数”变化（人眼感知速度看的是快了几倍）：0% → 4，50% → 13，70% → 20，100% → 40 帧/秒
+        // 动画由图层在渲染服务器里播放，帧率高低几乎不影响 CPU
         let u = min(max(usage, 0), 1)
         let fps = 4 * pow(10, u)
         let interval = 1 / fps
         if CommandLine.arguments.contains("--fps-log") { NSLog("fps debug: usage=%.0f%% fps=%.1f", u * 100, fps) }
-        animTimer?.invalidate()
-        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.frameIndex = (self.frameIndex + 1) % self.frames.count
-            self.updateStatusImage()
-        }
-        RunLoop.main.add(t, forMode: .common)
-        animTimer = t
+        _ = interval
+        setRunSpeed(fps)
     }
 
     @objc private func toggleLogin(_ sender: NSMenuItem) {
