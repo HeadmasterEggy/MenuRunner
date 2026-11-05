@@ -25,7 +25,7 @@
 
 ## Features
 
-- **Runners** — a galloping cat, a steaming coffee cup a rainbow cat (our cat flying with a waving rainbow trail and twinkling stars) a monochrome pixel cat with a stepped stripe trail, a colour pixel-art Rocket Cat (an orange tabby riding a rocket with a flickering flame), plus smooth vector runners: a running stick figure, a flapping bird, a colour clownfish blowing bubbles, a spinning fan, a scrolling heartbeat line and bouncing sound-wave bars — all original designs, drawn in code as template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
+- **Runners** — a galloping cat, a steaming coffee cup a rainbow cat (our cat flying with a waving rainbow trail and twinkling stars) a monochrome pixel cat with a stepped stripe trail, a colour pixel-art Rocket Cat (an orange tabby riding a rocket with a flickering flame), plus smooth vector runners: a soaring bird, a colour goldfish blowing bubbles, a spinning fan, a scrolling heartbeat line and bouncing sound-wave bars — all original designs, drawn in code as template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
 - **Menu bar metrics with live mini graphs** — CPU, GPU, memory, battery, network, SoC or battery temperature. Choose *Graph + Number*, *Graph only* or *Number only*.
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
   - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version
