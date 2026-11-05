@@ -300,7 +300,7 @@ struct Runner {
         }
     }
 
-    static let all: [Runner] = [cat, coffee, rainbow, pixelCat, rocketCat]
+    static let all: [Runner] = [cat, coffee, rainbow, pixelCat, rocketCat, stickman, bird, fish, fan, pulse, bars]
 
     // 橘猫火箭（原创彩色像素画）：橘猫骑着小火箭，尾焰闪烁，星星一闪一闪
     static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 6, size: NSSize(width: 36, height: 20), template: false) { t in
@@ -628,6 +628,191 @@ struct Runner {
             .draw(in: NSRect(x: -1, y: base - 2, width: 24, height: 24 - base), angle: 90)
         NSGraphicsContext.current?.compositingOperation = .sourceOver
         ctx.endTransparencyLayer()
+    }
+}
+
+// MARK: - 更多 Runner（矢量绘制，非像素）
+private func pt(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: x, y: y) }
+
+extension Runner {
+    // 小风扇：四片弯叶片顺时针转，带一层淡淡的残影
+    static let fan = Runner(id: "fan", name: "风扇|Fan", frameCount: 12, size: NSSize(width: 20, height: 20)) { t in
+        let ctx = NSGraphicsContext.current!.cgContext
+        let ring = NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 18, height: 18))
+        ring.lineWidth = 1.3; ring.stroke()
+        for k in 0..<4 {
+            for (off, a) in [(0.35, 0.22), (0.0, 1.0)] {       // 先画残影，再画叶片
+                ctx.saveGState()
+                ctx.translateBy(x: 10, y: 10)
+                ctx.rotate(by: CGFloat(-t / 4 + Double(k) * .pi / 2 + off))   // 4 重对称：一圈动画转 1/4 圈
+                let b = NSBezierPath()
+                b.move(to: pt(-0.8, 1.6))
+                b.curve(to: pt(-0.2, 7.6), controlPoint1: pt(-2.6, 4.2), controlPoint2: pt(-2.4, 7.0))
+                b.curve(to: pt(3.8, 5.6), controlPoint1: pt(1.6, 8.6), controlPoint2: pt(3.6, 7.6))
+                b.curve(to: pt(0.9, 1.6), controlPoint1: pt(3.6, 4.0), controlPoint2: pt(2.0, 2.4))
+                b.close()
+                NSColor.black.withAlphaComponent(a).setFill(); b.fill()
+                ctx.restoreGState()
+            }
+        }
+        NSColor.black.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 7.6, y: 7.6, width: 4.8, height: 4.8)).fill()            // 轴心
+        punch { NSBezierPath(ovalIn: NSRect(x: 9.1, y: 9.1, width: 1.8, height: 1.8)).fill() }
+    }
+
+    // 心电图：波形向左滚动，左侧渐隐，右端一个亮点
+    static let pulse = Runner(id: "pulse", name: "心电图|Heartbeat", frameCount: 15, size: NSSize(width: 30, height: 18)) { t in
+        let ctx = NSGraphicsContext.current!.cgContext
+        let period = 30.0, off = t / (2 * .pi) * period, base = 6.5
+        let keys: [(Double, Double)] = [(0, 0), (4, 0), (5.5, 1.3), (7, 0), (10, 0), (11, -1.3), (12.6, 9.5), (14.2, -3.2),
+                                        (15.6, 0), (18, 0), (20, 2.0), (22.5, 0), (30, 0)]
+        func ecg(_ x: Double) -> Double {
+            let u = (x + off).truncatingRemainder(dividingBy: period)
+            for i in 0..<(keys.count - 1) where u >= keys[i].0 && u <= keys[i + 1].0 {
+                let (a, va) = keys[i], (b, vb) = keys[i + 1]
+                return base + va + (vb - va) * (u - a) / (b - a)
+            }
+            return base
+        }
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        let line = NSBezierPath()
+        line.lineWidth = 1.5; line.lineCapStyle = .round; line.lineJoinStyle = .round
+        line.move(to: pt(1.5, ecg(0)))
+        for i in 1...108 { let x = Double(i) * 0.25; line.line(to: pt(x + 1.5, ecg(x))) }
+        line.stroke()
+        NSGraphicsContext.current?.compositingOperation = .destinationIn
+        NSGradient(colorsAndLocations: (NSColor.black.withAlphaComponent(0), 0), (NSColor.black, 0.55), (NSColor.black, 1))!
+            .draw(in: NSRect(x: 0, y: 0, width: 30, height: 18), angle: 0)
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        ctx.endTransparencyLayer()
+        let y = ecg(27)
+        NSBezierPath(ovalIn: NSRect(x: 27.1, y: y - 1.4, width: 2.8, height: 2.8)).fill()
+    }
+
+    // 小鸟：扑翅飞行，下扑时身体微微上升；远侧翅膀半透明
+    static let bird = Runner(id: "bird", name: "小鸟|Bird", frameCount: 12, size: NSSize(width: 26, height: 18)) { t in
+        let s = sin(t), by = 8 + cos(t) * 0.9
+        let sh = pt(11.5, by + 1.6)                          // 翅根
+        func wing(_ phase: Double, _ alpha: CGFloat) {
+            let ws = sin(t + phase), L = 7.6
+            let tip = pt(sh.x - 3.2, sh.y + ws * L)
+            let w = NSBezierPath()
+            w.move(to: pt(sh.x + 2.6, sh.y))
+            w.curve(to: tip, controlPoint1: pt(sh.x + 2.4, sh.y + ws * L * 0.6), controlPoint2: pt(tip.x + 1.6, tip.y))
+            w.curve(to: pt(sh.x - 3.4, sh.y), controlPoint1: pt(tip.x - 1.2, tip.y - ws * 2.2), controlPoint2: pt(sh.x - 3.6, sh.y + ws * 2.4))
+            w.close()
+            NSColor.black.withAlphaComponent(alpha).setFill(); w.fill(); NSColor.black.setFill()
+        }
+        wing(-0.5, 0.45)
+        let tail = NSBezierPath()                            // 燕尾
+        tail.move(to: pt(6.5, by + 0.8)); tail.line(to: pt(1.2, by + 2.6 - s * 0.6)); tail.line(to: pt(1.8, by + 0.4 - s * 0.4))
+        tail.line(to: pt(1.2, by - 1.6 - s * 0.2)); tail.line(to: pt(6.5, by - 0.6)); tail.close(); tail.fill()
+        NSBezierPath(ovalIn: NSRect(x: 4.8, y: by - 2.6, width: 12.4, height: 5.6)).fill()      // 身体
+        NSBezierPath(ovalIn: NSRect(x: 15.0, y: by - 0.6, width: 5.6, height: 5.4)).fill()      // 头
+        let beak = NSBezierPath()
+        beak.move(to: pt(20.2, by + 2.6)); beak.line(to: pt(23.4, by + 1.6)); beak.line(to: pt(20.0, by + 0.8)); beak.close(); beak.fill()
+        punch { NSBezierPath(ovalIn: NSRect(x: 17.9, y: by + 2.1, width: 1.3, height: 1.3)).fill() }   // 眼睛
+        wing(0, 1)
+    }
+
+    // 音波：五根圆头竖条随节奏跳动
+    static let bars = Runner(id: "bars", name: "音波|Sound Wave", frameCount: 12, size: NSSize(width: 22, height: 18)) { t in
+        let phase = [0, 2.1, 4.0, 1.1, 3.1], k = [1.0, 2, 1, 3, 2]   // 频率取整数倍，循环无缝
+        for i in 0..<5 {
+            let v = 0.5 + 0.32 * sin(k[i] * t + phase[i]) + 0.18 * sin((k[i] + 1) * t + phase[i] * 1.7)
+            let h = 2.6 + v * 12.4
+            NSBezierPath(roundedRect: NSRect(x: 1.6 + Double(i) * 3.9, y: 9 - h / 2, width: 2.8, height: h), xRadius: 1.4, yRadius: 1.4).fill()
+        }
+    }
+
+    // 小丑鱼（彩色）：摆尾游动，身后冒泡泡
+    static let fish = Runner(id: "fish", name: "小丑鱼|Clownfish", frameCount: 12, size: NSSize(width: 30, height: 18), template: false) { t in
+        let ctx = NSGraphicsContext.current!.cgContext
+        func c(_ r: Double, _ g: Double, _ b: Double) -> NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: 1) }
+        let orange = c(0.97, 0.50, 0.16), white = c(1.0, 0.98, 0.95), dark = c(0.16, 0.13, 0.16)
+        let s = sin(t), by = 9 + sin(t + 1) * 0.6
+        func paint(_ p: NSBezierPath, _ fill: NSColor, _ line: CGFloat) {
+            fill.setFill(); p.fill()
+            p.lineWidth = line; p.lineCapStyle = .round; p.lineJoinStyle = .round
+            dark.setStroke(); p.stroke()
+        }
+        // 泡泡：往上飘、左右轻晃、越高越淡（跟随菜单栏文字色）
+        for (x0, ph, r) in [(26.5, 0.0, 1.1), (24.5, 2.6, 0.8), (27.5, 4.5, 0.6)] {
+            let u = ((t + ph) / (2 * .pi)).truncatingRemainder(dividingBy: 1)
+            let y = 11 + u * 7, x = x0 + sin(u * 9 + ph) * 0.6
+            let b = NSBezierPath(ovalIn: NSRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r))
+            b.lineWidth = 0.6
+            NSColor.labelColor.withAlphaComponent(0.8 * (1 - u * 0.6)).setStroke(); b.stroke()
+        }
+        // 尾巴
+        ctx.saveGState()
+        ctx.translateBy(x: 7, y: by); ctx.rotate(by: CGFloat(s * 0.35))
+        let tail = NSBezierPath()
+        tail.move(to: pt(1, 0))
+        tail.curve(to: pt(-5.2, 4.6), controlPoint1: pt(-2.2, 1.6), controlPoint2: pt(-4.4, 4.0))
+        tail.curve(to: pt(-4.2, 0), controlPoint1: pt(-5.4, 3.0), controlPoint2: pt(-3.6, 1.0))
+        tail.curve(to: pt(-5.2, -4.6), controlPoint1: pt(-3.6, -1.0), controlPoint2: pt(-5.4, -3.0))
+        tail.curve(to: pt(1, 0), controlPoint1: pt(-4.4, -4.0), controlPoint2: pt(-2.2, -1.6))
+        tail.close()
+        paint(tail, orange, 0.8)
+        ctx.restoreGState()
+        // 背鳍
+        let fin = NSBezierPath()
+        fin.move(to: pt(10.2, by + 3.8))
+        fin.curve(to: pt(16.4, by + 4.8), controlPoint1: pt(11.6, by + 7.6), controlPoint2: pt(15.6, by + 7.8))
+        fin.curve(to: pt(10.2, by + 3.8), controlPoint1: pt(14.0, by + 4.4), controlPoint2: pt(12.0, by + 4.2))
+        fin.close()
+        paint(fin, orange, 0.7)
+        // 身体 + 两道白条纹（用身体裁剪）
+        let body = NSBezierPath()
+        body.move(to: pt(6.6, by))
+        body.curve(to: pt(21.4, by), controlPoint1: pt(9.4, by + 5.6), controlPoint2: pt(17.4, by + 5.2))
+        body.curve(to: pt(6.6, by), controlPoint1: pt(21.4, by - 5.4), controlPoint2: pt(9.4, by - 5.6))
+        body.close()
+        orange.setFill(); body.fill()
+        ctx.saveGState()
+        body.addClip()
+        for x in [10.2, 15.6] {
+            dark.setFill(); NSRect(x: x - 0.5, y: by - 6, width: 3.0, height: 12).fill()
+            white.setFill(); NSRect(x: x, y: by - 6, width: 2.0, height: 12).fill()
+        }
+        ctx.restoreGState()
+        body.lineWidth = 0.8; body.lineJoinStyle = .round; dark.setStroke(); body.stroke()
+        // 眼睛
+        dark.setFill(); NSBezierPath(ovalIn: NSRect(x: 17.4, y: by + 0.6, width: 2.0, height: 2.0)).fill()
+        NSColor.white.setFill(); NSBezierPath(ovalIn: NSRect(x: 18.4, y: by + 1.8, width: 0.6, height: 0.6)).fill()
+    }
+
+    // 奔跑小人：两段式手脚，前倾跑姿；远侧手脚半透明
+    static let stickman = Runner(id: "stickman", name: "小人|Stickman", frameCount: 12, size: NSSize(width: 20, height: 20)) { t in
+        let bob = abs(cos(t)) * 0.9, lean = 0.22, torso = 5.4
+        let hip = pt(8.6, 7.6 + bob)
+        let neck = pt(hip.x + sin(lean) * torso, hip.y + cos(lean) * torso)
+        func seg(_ p: NSPoint, _ a: Double, _ l: Double) -> NSPoint { pt(p.x + sin(a) * l, p.y - cos(a) * l) }   // a = 0 竖直向下，正值向前
+        func limb(_ pts: [NSPoint], _ w: CGFloat, _ alpha: CGFloat) {
+            NSColor.black.withAlphaComponent(alpha).setStroke()
+            strokeLine(pts, w)
+            NSColor.black.setStroke()
+        }
+        func leg(_ p: Double, _ alpha: CGFloat) {
+            let thigh = 0.75 * sin(p)
+            let knee = seg(hip, thigh, 3.9)
+            let bend = 0.15 + 1.1 * max(0, cos(p + 0.7))       // 腿往前摆时屈膝
+            var foot = seg(knee, thigh - bend, 3.9)
+            foot.y = max(1.0, foot.y)
+            limb([hip, knee, foot], 1.9, alpha)
+        }
+        func arm(_ p: Double, _ alpha: CGFloat) {
+            let upper = -0.85 * sin(p)
+            let shoulder = pt(neck.x - 0.2, neck.y - 0.6)
+            let elbow = seg(shoulder, upper, 2.8)
+            limb([shoulder, elbow, seg(elbow, upper + 1.6, 2.5)], 1.6, alpha)
+        }
+        leg(t + .pi, 0.45); arm(t, 0.45)
+        strokeLine([hip, neck], 2.2)
+        let head = pt(neck.x + sin(lean) * 2.5, neck.y + cos(lean) * 2.5)
+        NSBezierPath(ovalIn: NSRect(x: head.x - 2.1, y: head.y - 2.1, width: 4.2, height: 4.2)).fill()
+        leg(t, 1); arm(t + .pi, 1)
     }
 }
 
