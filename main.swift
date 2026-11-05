@@ -272,13 +272,14 @@ struct Runner {
     let frameCount: Int
     let size: NSSize
     var template = true                    // false = 彩色图（不随菜单栏变色）
-    let draw: (_ t: Double) -> Void       // t: 0 ~ 2π
+    var levels = 1                         // >1：按占用率分档，每档一套帧（如心电图档位越高心跳越密）
+    let draw: (_ t: Double, _ level: Int) -> Void       // t: 0 ~ 2π；level: 0 ..< levels
 
     var displayName: String { let p = name.split(separator: "|").map(String.init); return L(p[0], p.count > 1 ? p[1] : p[0]) }
 
     /// 每帧只画一次，存成 2x 位图（之前每次显示都会重画，菜单栏动画一直占 CPU）
     /// appearance：彩色 runner 里用到的动态颜色（如 labelColor）按它解析
-    func frames(appearance: NSAppearance? = nil) -> [NSImage] {
+    func frames(appearance: NSAppearance? = nil, level: Int = 0) -> [NSImage] {
         (0..<frameCount).map { i in
             let scale: CGFloat = 2
             let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
@@ -289,7 +290,7 @@ struct Runner {
             NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
             let render = {
                 NSColor.black.setFill(); NSColor.black.setStroke()
-                self.draw(Double(i) / Double(self.frameCount) * 2 * .pi)
+                self.draw(Double(i) / Double(self.frameCount) * 2 * .pi, level)
             }
             if let appearance { appearance.performAsCurrentDrawingAppearance(render) } else { render() }
             NSGraphicsContext.restoreGraphicsState()
@@ -303,7 +304,7 @@ struct Runner {
     static let all: [Runner] = [coffee, rocketCat, fan, pulse, bars]
 
     // 橘猫火箭（原创彩色像素画）：橘猫骑着小火箭，尾焰闪烁，星星一闪一闪
-    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 6, size: NSSize(width: 36, height: 20), template: false) { t in
+    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 6, size: NSSize(width: 36, height: 20), template: false) { t, _ in
         let W = 36, H = 20
         let f = Int((t / (2 * .pi) * 6).rounded()) % 6
         func c(_ r: Double, _ g: Double, _ b: Double) -> NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: 1) }
@@ -386,7 +387,7 @@ struct Runner {
     }
 
     // 一杯咖啡：圆润杯子 + 细节（杯沿、液面、高光），热气从整个杯口升起、往上收细变淡
-    static let coffee = Runner(id: "coffee", name: "咖啡|Coffee", frameCount: 12, size: NSSize(width: 22, height: 22)) { t in
+    static let coffee = Runner(id: "coffee", name: "咖啡|Coffee", frameCount: 12, size: NSSize(width: 22, height: 22)) { t, _ in
         let ctx = NSGraphicsContext.current!.cgContext
         ctx.translateBy(x: 0.5, y: 0)                       // 左右留边
 
@@ -457,7 +458,7 @@ private func pt(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: x, y: y) }
 
 extension Runner {
     // 小风扇：四片弯叶片顺时针转，带一层淡淡的残影
-    static let fan = Runner(id: "fan", name: "风扇|Fan", frameCount: 12, size: NSSize(width: 20, height: 20)) { t in
+    static let fan = Runner(id: "fan", name: "风扇|Fan", frameCount: 12, size: NSSize(width: 20, height: 20)) { t, _ in
         let ctx = NSGraphicsContext.current!.cgContext
         let ring = NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 18, height: 18))
         ring.lineWidth = 1.3; ring.stroke()
@@ -481,17 +482,22 @@ extension Runner {
         punch { NSBezierPath(ovalIn: NSRect(x: 9.1, y: 9.1, width: 1.8, height: 1.8)).fill() }
     }
 
-    // 心电图：波形向左滚动，左侧渐隐，右端一个亮点
-    static let pulse = Runner(id: "pulse", name: "心电图|Heartbeat", frameCount: 15, size: NSSize(width: 30, height: 18)) { t in
+    // 心电图：波形向左滚动，左侧渐隐，右端一个亮点；占用率越高档位越高，窗口里的心跳越密（1 / 2 / 3 拍）、滚得越快（每帧 ×1 / ×2 / ×3），每拍高低不一，档位越高峰越高
+    static let pulse = Runner(id: "pulse", name: "心电图|Heartbeat", frameCount: 45, size: NSSize(width: 30, height: 18), levels: 3) { t, level in
         let ctx = NSGraphicsContext.current!.cgContext
-        let period = 30.0, off = t / (2 * .pi) * period, base = 6.5
+        // 一圈帧滚过 90×(level+1) 个单位 = 3×(level+1)² 拍，循环无缝；拍子变密时波形横向压缩
+        let period = 30.0 / Double(level + 1), sx = [1, 0.6, 0.42][level], off = t / (2 * .pi) * 90 * Double(level + 1), base = 5.0
+        let beats = 3 * (level + 1) * (level + 1)
+        let amps = [1.0, 0.8, 0.92, 0.72, 0.97, 0.84, 0.88, 0.76, 0.94]   // 每拍的幅度
+        let scale = [0.7, 0.9, 1.15][level]                                 // 档位整体高度
         let keys: [(Double, Double)] = [(0, 0), (4, 0), (5.5, 1.3), (7, 0), (10, 0), (11, -1.3), (12.6, 9.5), (14.2, -3.2),
-                                        (15.6, 0), (18, 0), (20, 2.0), (22.5, 0), (30, 0)]
+                                        (15.6, 0), (18, 0), (20, 2.0), (22.5, 0)].map { ($0.0 * sx, $0.1) } + [(period, 0)]
         func ecg(_ x: Double) -> Double {
-            let u = (x + off).truncatingRemainder(dividingBy: period)
+            let p = x + off, u = p.truncatingRemainder(dividingBy: period)
+            let amp = scale * amps[Int(p / period) % beats % amps.count]
             for i in 0..<(keys.count - 1) where u >= keys[i].0 && u <= keys[i + 1].0 {
                 let (a, va) = keys[i], (b, vb) = keys[i + 1]
-                return base + va + (vb - va) * (u - a) / (b - a)
+                return base + amp * (va + (vb - va) * (u - a) / (b - a))
             }
             return base
         }
@@ -511,7 +517,7 @@ extension Runner {
     }
 
     // 音波：五根圆头竖条随节奏跳动
-    static let bars = Runner(id: "bars", name: "音波|Sound Wave", frameCount: 12, size: NSSize(width: 22, height: 18)) { t in
+    static let bars = Runner(id: "bars", name: "音波|Sound Wave", frameCount: 12, size: NSSize(width: 22, height: 18)) { t, _ in
         let phase = [0, 2.1, 4.0, 1.1, 3.1], k = [1.0, 2, 1, 3, 2]   // 频率取整数倍，循环无缝
         for i in 0..<5 {
             let v = 0.5 + 0.32 * sin(k[i] * t + phase[i]) + 0.18 * sin((k[i] + 1) * t + phase[i] * 1.7)
@@ -2244,6 +2250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var animTimer: Timer?
     private var sampleTimer: Timer?
     private var usage = 0.0
+    private var runLevel = 0
 
     /// 菜单栏文字显示什么
     /// 菜单栏旁边显示什么；默认不显示（只有 runner 图标）
@@ -2276,7 +2283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let dark = b.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             guard dark != self.lastDark else { return }
             self.lastDark = dark
-            self.frames = self.runner.frames(appearance: b.effectiveAppearance)
+            self.frames = self.runner.frames(appearance: b.effectiveAppearance, level: self.runLevel)
             self.installRunAnimation()                 // 单色 runner 重新上色（深色 → 白，浅色 → 黑）
         }
         installRunAnimation()
@@ -2414,7 +2421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch key {
         case "runner":
             guard let r = Runner.all.first(where: { $0.id == id }) else { return }
-            runner = r; frames = r.frames(appearance: statusItem.button?.effectiveAppearance); frameIndex = 0
+            runner = r; runLevel = 0; frames = r.frames(appearance: statusItem.button?.effectiveAppearance); frameIndex = 0
             UserDefaults.standard.set(id, forKey: "runner")
             updateStatusImage()
             installRunAnimation()
@@ -2728,6 +2735,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 动画由图层在渲染服务器里播放，帧率高低几乎不影响 CPU
         let u = min(max(usage, 0), 1)
         let fps = 4 * pow(10, u)
+        // 分档 runner：越过档位边界 0.1 才换档，避免占用率在边界附近抖动时反复换帧
+        let raw = u * Double(runner.levels)
+        if runner.levels > 1, abs(raw - (Double(runLevel) + 0.5)) > 0.6 {
+            runLevel = min(Int(raw), runner.levels - 1)
+            frames = runner.frames(appearance: statusItem.button?.effectiveAppearance, level: runLevel)
+            installRunAnimation()
+        }
         let interval = 1 / fps
         if CommandLine.arguments.contains("--fps-log") { NSLog("fps debug: usage=%.0f%% fps=%.1f", u * 100, fps) }
         _ = interval
@@ -2764,18 +2778,21 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--stats" {
     exit(0)
 }
 
-// MenuRunner --runner <id> out.png：单个 runner 放大 12 倍，上行深色背景、下行浅色背景
+// MenuRunner --runner <id> out.png：单个 runner 放大 12 倍，每档两行：深色背景、浅色背景
 if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "--runner",
    let r = Runner.all.first(where: { $0.id == CommandLine.arguments[2] }) {
     let sc: CGFloat = 12, fw = r.size.width * sc, fh = r.size.height * sc
-    let frames = r.frames()
-    let sheet = NSImage(size: NSSize(width: fw * CGFloat(frames.count), height: fh * 2), flipped: true) { _ in
-        for (row, bg) in [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.93, alpha: 1)].enumerated() {
-            bg.setFill(); NSRect(x: 0, y: CGFloat(row) * fh, width: fw * CGFloat(frames.count), height: fh).fill()
-            NSGraphicsContext.current?.imageInterpolation = .none
-            for (i, img) in frames.enumerated() {
-                img.draw(in: NSRect(x: CGFloat(i) * fw, y: CGFloat(row) * fh, width: fw, height: fh), from: .zero,
-                         operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    let sheet = NSImage(size: NSSize(width: fw * CGFloat(r.frameCount), height: fh * 2 * CGFloat(r.levels)), flipped: true) { _ in
+        for level in 0..<r.levels {
+            let frames = r.frames(level: level)
+            for (k, bg) in [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.93, alpha: 1)].enumerated() {
+                let row = level * 2 + k
+                bg.setFill(); NSRect(x: 0, y: CGFloat(row) * fh, width: fw * CGFloat(frames.count), height: fh).fill()
+                NSGraphicsContext.current?.imageInterpolation = .none
+                for (i, img) in frames.enumerated() {
+                    img.draw(in: NSRect(x: CGFloat(i) * fw, y: CGFloat(row) * fh, width: fw, height: fh), from: .zero,
+                             operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                }
             }
         }
         return true
