@@ -2883,12 +2883,13 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--icon" {
 }
 
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--preview" {
-    let sc = 8.0, w = Runner.all.map { $0.size.width * CGFloat($0.frameCount) }.max()!
+    let maxFrames = 15                                   // 帧多的 runner（心电图 45 帧）只画前 15 帧，图别太宽
+    let sc = 8.0, w = Runner.all.map { $0.size.width * CGFloat(min($0.frameCount, maxFrames)) }.max()!
     let rowH = 22.0, rows = Double(Runner.all.count)
     let sheet = NSImage(size: NSSize(width: w * sc, height: rowH * sc * rows), flipped: true) { _ in
         NSColor.white.setFill(); NSRect(x: 0, y: 0, width: w * sc, height: rowH * sc * rows).fill()
         for (row, r) in Runner.all.enumerated() {
-            for (i, f) in r.frames().enumerated() {
+            for (i, f) in r.frames().prefix(maxFrames).enumerated() {
                 f.draw(in: NSRect(x: Double(i) * r.size.width * sc, y: Double(row) * rowH * sc, width: r.size.width * sc, height: r.size.height * sc),
                        from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             }

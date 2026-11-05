@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/icon.png" width="128" alt="MenuRunner icon">
+<img src="docs/icon.png" width="128" alt="MenuRunner 图标">
 
 # MenuRunner
 
@@ -13,13 +13,13 @@
 ![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-555?style=flat-square)
 
-<img src="docs/panel.png" width="260" alt="面板">&nbsp;&nbsp;<img src="docs/cpu.png" width="260" alt="CPU 详情">&nbsp;&nbsp;<img src="docs/memory.png" width="260" alt="按应用查看内存">
+<img src="docs/zh/panel.png" width="260" alt="面板">&nbsp;&nbsp;<img src="docs/zh/cpu.png" width="260" alt="CPU 详情">&nbsp;&nbsp;<img src="docs/zh/memory.png" width="260" alt="按应用查看内存">
 
-<img src="docs/settings.png" width="260" alt="设置">
+<img src="docs/zh/settings.png" width="260" alt="设置">
 
 <img src="docs/rocket.png" width="640" alt="橘猫火箭">
 
-<img src="docs/runners.png" alt="Runner">
+<img src="docs/runners.png" alt="Runner 动画">
 
 </div>
 
