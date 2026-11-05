@@ -860,6 +860,7 @@ enum ProcessMemory {
 // MARK: - 详情页数据（每张卡片点进去看到的内容）
 struct AppStat { var name: String, path: String?, value: Double, processes: Int }
 struct NetInterface { var bsd: String, name: String, ipv4: String, up: Double, down: Double }
+struct ProcMem { var pid: pid_t, name: String, path: String?, bytes: UInt64, user: String }
 struct VolumeInfo { var name: String, path: String, used: Double, total: Double }
 
 enum DetailKind { case system, cpu, gpu, memory, temps, storage, battery, network }
@@ -877,6 +878,21 @@ enum AppIdentity {
     static func prune(_ alive: [pid_t]) {
         let set = Set(alive)
         cache = cache.filter { set.contains($0.key) }
+        procCache = procCache.filter { set.contains($0.key) }
+    }
+
+    /// 单个进程：完整可执行文件名 + 所属应用路径（图标 / 在访达中显示）
+    private static var procCache: [pid_t: (name: String, path: String?)] = [:]
+    static func process(_ pid: pid_t) -> (name: String, path: String?) {
+        if let c = procCache[pid] { return c }
+        var buf = [CChar](repeating: 0, count: 4096)
+        let len = proc_pidpath(pid, &buf, UInt32(buf.count))
+        let path = len > 0 ? String(cString: buf) : ""
+        var name = (path as NSString).lastPathComponent
+        if name.isEmpty { var nb = [CChar](repeating: 0, count: 256); proc_name(pid, &nb, UInt32(nb.count)); name = String(cString: nb) }
+        if name.isEmpty { name = "pid \(pid)" }
+        let v = (name, of(pid).path ?? (path.isEmpty ? nil : path))
+        procCache[pid] = v; return v
     }
 
     private static func lookup(_ pid: pid_t) -> (key: String, name: String, path: String?) {
@@ -920,6 +936,7 @@ final class DetailProvider {
     var cores: [Double] = []
     var cpuApps: [AppStat] = [], gpuApps: [AppStat] = [], netApps: [AppStat] = []
     var memApps: [AppMemory] = []
+    var memProcs: [ProcMem] = []
     var interfaces: [NetInterface] = []
     var volumes: [VolumeInfo] = []
     var sensors: [(String, Double)] = []
@@ -959,7 +976,7 @@ final class DetailProvider {
         switch kind {
         case .cpu:     refreshCores(); refreshCPUApps(dt(&tCPU))
         case .gpu:     refreshGPU(dt(&tGPU))
-        case .memory:  memApps = ProcessMemory.top(PanelController.procRows)
+        case .memory:  memApps = ProcessMemory.top(PanelController.procRows); startMemTop()
         case .temps:   sensors = TempMonitor.shared.readAll()
         case .storage: refreshVolumes(); refreshAppSizes()
         case .network: refreshInterfaces(dt(&tIf)); refreshNetApps()
@@ -1112,6 +1129,57 @@ final class DetailProvider {
         netPipe?.fileHandleForReading.readabilityHandler = nil
         netProc?.terminate(); netProc = nil; netPipe = nil
         netApps = []
+        stopMemTop()
+    }
+
+    // 占内存最多的进程（含 root / 其他用户的系统进程）：普通 API 读不到别的用户的进程，
+    // top 可以。详情页打开时常驻一个 top，每 3 秒一组（约占 4% 单核），关闭页面就结束
+    private var topProc: Process?
+    private var topPipe: Pipe?
+    private var topBuffer = ""
+    private var topBlock: [ProcMem] = []
+
+    private func startMemTop() {
+        guard topProc == nil else { return }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/script")   // 伪终端：避免 top 输出到管道时整块缓冲
+        p.arguments = ["-q", "/dev/null", "/usr/bin/top", "-l", "0", "-s", "3", "-o", "mem", "-n", "\(PanelController.topProcRows)", "-stats", "pid,mem,user"]
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        topBuffer = ""; topBlock = []
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let text = String(decoding: h.availableData, as: UTF8.self)
+            DispatchQueue.main.async { self?.consumeTop(text) }
+        }
+        guard (try? p.run()) != nil else { return }
+        topProc = p; topPipe = pipe
+    }
+
+    private func consumeTop(_ chunk: String) {
+        topBuffer += chunk
+        while let nl = topBuffer.firstIndex(where: \.isNewline) {
+            let line = topBuffer[..<nl].trimmingCharacters(in: .whitespacesAndNewlines); topBuffer.removeSubrange(...nl)
+            let f = line.split(separator: " ", omittingEmptySubsequences: true)
+            if f.first == "PID" { topBlock = []; continue }               // 新一组
+            guard f.count >= 3, let pid = pid_t(f[0]), let bytes = Self.topBytes(f[1]) else { continue }
+            let id = AppIdentity.process(pid)
+            topBlock.append(ProcMem(pid: pid, name: id.name, path: id.path, bytes: bytes, user: String(f[2])))
+            if topBlock.count == PanelController.topProcRows { memProcs = topBlock; topBlock = [] }
+        }
+    }
+
+    /// top 的 MEM 列："2368M"、"996M+"、"12K"、"1.2G"
+    private static func topBytes(_ s: Substring) -> UInt64? {
+        let t = s.trimmingCharacters(in: CharacterSet(charactersIn: "+-"))
+        guard let u = t.last, let v = Double(t.dropLast()) else { return nil }
+        let m: Double = u == "K" ? 1024 : u == "M" ? 1_048_576 : u == "G" ? 1_073_741_824 : u == "B" ? 1 : 0
+        return m > 0 ? UInt64(v * m) : nil
+    }
+
+    private func stopMemTop() {
+        topPipe?.fileHandleForReading.readabilityHandler = nil
+        topProc?.terminate(); topProc = nil; topPipe = nil
+        memProcs = []
     }
 
     // 各应用占用的磁盘空间：后台用 du 计算，缓存 10 分钟
@@ -1292,9 +1360,15 @@ extension NSColor {
 
 enum Draw {
     static func text(_ s: String, _ p: NSPoint, size: CGFloat = 12, weight: NSFont.Weight = .regular,
-                     color: NSColor = .labelColor, right: Bool = false, mono: Bool = false) {
+                     color: NSColor = .labelColor, right: Bool = false, mono: Bool = false, maxWidth: CGFloat? = nil) {
         let font = mono ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight) : NSFont.systemFont(ofSize: size, weight: weight)
         let str = NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color])
+        if let mw = maxWidth, str.size().width > mw {   // 太长：末尾省略号
+            let ps = NSMutableParagraphStyle(); ps.lineBreakMode = .byTruncatingTail
+            NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: ps])
+                .draw(with: NSRect(x: p.x, y: p.y, width: mw, height: str.size().height), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+            return
+        }
         str.draw(at: NSPoint(x: right ? p.x - str.size().width : p.x, y: p.y))
     }
 
@@ -1536,7 +1610,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
     }
 
     // MARK: 详情页（每张卡片都能点进去）
-    static let procRows = 10
+    static let procRows = 8, topProcRows = 10
     let detail = DetailProvider()
     private var detailKind: DetailKind = .memory
     private var detailPages: [String: Page] = [:]
@@ -1601,7 +1675,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
             case .system, .battery: rows.append((CGFloat(max(1, kvRows.count)) * 24 + 14, [(0, W, drawKV, nil)]))
             case .cpu:     rows += [(132, [(0, W, drawCores, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("占用 CPU 最多的应用", "Top apps by CPU"), self?.detail.cpuApps ?? [], { String(format: "%.1f%%", $0 * 100) }) }, nil)])]
             case .gpu:     rows += [(4 * 24 + 46, [(0, W, drawGPUStats, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("占用 GPU 最多的应用", "Top apps by GPU"), self?.detail.gpuApps ?? [], { String(format: "%.1f%%", $0 * 100) }) }, nil)])]
-            case .memory:  rows.append((CGFloat(Self.procRows) * 30 + 44, [(0, W, drawProcessList, nil)]))
+            case .memory:  rows += [(CGFloat(Self.procRows) * 30 + 46, [(0, W, drawProcessList, nil)]),
+                                    (CGFloat(Self.topProcRows) * 30 + 46, [(0, W, drawTopProcs, nil)])]
             case .temps:   rows.append((CGFloat(max(1, min(14, (detail.sensors.count + 1) / 2))) * 22 + 24, [(0, W, drawSensors, nil)]))
             case .storage: rows += [(CGFloat(max(1, detail.volumes.count)) * 46 + 14, [(0, W, drawVolumes, nil)]),
                                     (12 * 30 + 46, [(0, W, drawAppSizes, nil)])]
@@ -1620,7 +1695,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
             if let list = p.cards.last {
                 switch k {
                 case .memory:
-                    list.rowAt = { [weak self] pt in self.flatMap { $0.rowHit(pt, top: 12, paths: $0.detail.memApps.map { $0.path }) } }
+                    list.rowAt = { [weak self] pt in self.flatMap { $0.rowHit(pt, top: 36, paths: $0.detail.memProcs.map { $0.path }) } }
+                    p.cards[p.cards.count - 2].rowAt = { [weak self] pt in self.flatMap { $0.rowHit(pt, top: 36, paths: $0.detail.memApps.map { $0.path }) } }
                 case .cpu, .gpu, .network, .storage:
                     list.rowAt = { [weak self] pt in
                         guard let self else { return nil }
@@ -1663,7 +1739,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         case .system:  return ("laptopcomputer", .labelColor, spec.model, "", spec.summary)
         case .cpu:     return ("cpu", .systemBlue, "CPU", Draw.pct(m.v("cpu")), spec.detail.components(separatedBy: " · ").first ?? "")
         case .gpu:     return ("cpu.fill", .systemGreen, "GPU", m.gpu == nil ? "--" : Draw.pct(m.v("gpu")), spec.gpuCores > 0 ? L("\(spec.gpuCores) 核 GPU", "\(spec.gpuCores)-core GPU") : "")
-        case .memory:  return ("memorychip", .systemPurple, L("内存占用", "Memory Usage"), "\(SystemInfo.gb(m.memory.used)) / \(SystemInfo.gb(m.memory.total))", L("按应用汇总", "Grouped by app"))
+        case .memory:  return ("memorychip", .systemPurple, L("内存占用", "Memory Usage"), "\(SystemInfo.gb(m.memory.used)) / \(SystemInfo.gb(m.memory.total))", L("应用 · 进程", "Apps · processes"))
         case .temps:   return ("thermometer.medium", .systemOrange, L("温度传感器", "Temperature Sensors"), m.temps.soc.map { TempUnit.format($0) } ?? "--", L("\(detail.sensors.count) 个传感器", "\(detail.sensors.count) sensors"))
         case .storage: return ("internaldrive", .systemIndigo, L("存储", "Storage"), m.storage.map { Draw.pct($0.used / $0.total) } ?? "--", L("已挂载的卷", "Mounted volumes"))
         case .battery: return ("battery.100", .systemGreen, L("电池", "Battery"), m.battery.map { "\($0.percent)%" } ?? "--", m.battery.map { SystemInfo.stateText($0.state) } ?? "")
@@ -1844,7 +1920,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let total = Double(model.memory.total)
         let procs = detail.memApps
         let maxBytes = Double(procs.first?.bytes ?? 1)
-        var y: CGFloat = 12
+        sectionTitle(L("按应用汇总", "By app"))
+        var y: CGFloat = 36
         for p in procs {
             rowHighlight(y, w, clickable: p.path != nil)
             ProcessMemory.icon(p.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver,
@@ -1857,8 +1934,32 @@ final class PanelController: NSObject, NSPopoverDelegate {
                      Double(p.bytes) / total > 0.15 ? .systemOrange : .systemPurple)
             y += 30
         }
-        Draw.text(L("系统进程（root）无权限读取，未计入", "System (root) processes are not readable and not listed"),
-                  NSPoint(x: 14, y: y + 6), size: 9, color: .glassTertiary)
+    }
+
+    /// 单个进程排行（含系统进程），非当前用户的进程在名字后标出所属用户
+    private func drawTopProcs(_ w: CGFloat) {
+        sectionTitle(L("占内存最多的进程（含系统进程）", "Top processes (incl. system)"))
+        let procs = detail.memProcs, total = Double(model.memory.total)
+        guard !procs.isEmpty else { Draw.text(L("采样中…", "Sampling…"), NSPoint(x: 14, y: 40), size: 11, color: .glassTertiary); return }
+        let maxBytes = Double(max(procs.first?.bytes ?? 1, 1)), me = NSUserName()
+        var y: CGFloat = 36
+        for p in procs {
+            rowHighlight(y, w, clickable: p.path != nil)
+            ProcessMemory.icon(p.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver,
+                                            fraction: 1, respectFlipped: true, hints: nil)
+            let value = ProcessMemory.format(p.bytes)
+            var nameW = w - 56 - 70
+            if p.user != me {
+                let tag = p.user.hasPrefix("_") ? String(p.user.dropFirst()) : p.user
+                Draw.text(tag, NSPoint(x: w - 14 - 78, y: y + 3), size: 9, color: .glassTertiary, right: true)
+                nameW -= 70
+            }
+            Draw.text(p.name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium, maxWidth: nameW)
+            Draw.text(value, NSPoint(x: w - 14, y: y + 1), size: 12, weight: .medium, right: true, mono: true)
+            Draw.bar(NSRect(x: 42, y: y + 20, width: w - 56, height: 3), Double(p.bytes) / maxBytes,
+                     Double(p.bytes) / total > 0.15 ? .systemOrange : .systemPurple)
+            y += 30
+        }
     }
 
     @objc private func settingsClicked(_ sender: NSButton) { onSettings(sender) }
