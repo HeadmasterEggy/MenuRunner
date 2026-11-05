@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/icon.png" width="128" alt="MenuRunner icon">
+<img src="docs/icon.png" width="128" alt="MenuRunner 图标">
 
 # MenuRunner
 
@@ -13,19 +13,19 @@
 ![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-555?style=flat-square)
 
-<img src="docs/panel.png" width="260" alt="面板">&nbsp;&nbsp;<img src="docs/cpu.png" width="260" alt="CPU 详情">&nbsp;&nbsp;<img src="docs/memory.png" width="260" alt="按应用查看内存">
+<img src="docs/zh/panel.png" width="260" alt="面板">&nbsp;&nbsp;<img src="docs/zh/cpu.png" width="260" alt="CPU 详情">&nbsp;&nbsp;<img src="docs/zh/memory.png" width="260" alt="按应用查看内存">
 
-<img src="docs/settings.png" width="260" alt="设置">
+<img src="docs/zh/settings.png" width="260" alt="设置">
 
 <img src="docs/rocket.png" width="640" alt="橘猫火箭">
 
-<img src="docs/runners.png" alt="Runner">
+<img src="docs/runners.png" alt="Runner 动画">
 
 </div>
 
 ## 功能
 
-- **Runner**：奔跑的猫、冒热气的咖啡、彩虹猫（我们的小猫拖着波浪彩虹在空中飞，周围有星星闪烁）、单色像素猫（拖着阶梯状条纹尾迹）、彩色像素画「橘猫火箭」（橘猫骑着火箭，尾焰闪烁），均为原创设计，用代码绘制的模板图，自动适配深浅色菜单栏；速度可以跟随 CPU、GPU 或内存占用。
+- **Runner**：冒热气的咖啡、彩色像素画「橘猫火箭」（橘猫骑着火箭，尾焰闪烁）、旋转风扇、滚动的心电图、跳动的音波，均为原创设计，用代码绘制；单色的是模板图，自动适配深浅色菜单栏；速度可以跟随 CPU、GPU 或内存占用，分三档、差别明显：风扇转得更快、残影更长，音波跳得更高，热气更浓，尾焰更长，心电图心跳更密、峰更高。
 - **菜单栏指标 + 动态小图**：CPU、GPU、内存、电池、网络、芯片或电池温度；可选「图表 + 数字」「仅图表」「仅数字」。
 - **液态玻璃面板**（`NSPopover` + `NSGlassEffectView`），60fps 动画：
   - 本机配置：机型、芯片、CPU / GPU 核心数、内存、硬盘、系统版本

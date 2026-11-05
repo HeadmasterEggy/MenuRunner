@@ -272,13 +272,14 @@ struct Runner {
     let frameCount: Int
     let size: NSSize
     var template = true                    // false = 彩色图（不随菜单栏变色）
-    let draw: (_ t: Double) -> Void       // t: 0 ~ 2π
+    var levels = 1                         // >1：按占用率分档，每档一套帧（如心电图档位越高心跳越密）
+    let draw: (_ t: Double, _ level: Int) -> Void       // t: 0 ~ 2π；level: 0 ..< levels
 
     var displayName: String { let p = name.split(separator: "|").map(String.init); return L(p[0], p.count > 1 ? p[1] : p[0]) }
 
     /// 每帧只画一次，存成 2x 位图（之前每次显示都会重画，菜单栏动画一直占 CPU）
     /// appearance：彩色 runner 里用到的动态颜色（如 labelColor）按它解析
-    func frames(appearance: NSAppearance? = nil) -> [NSImage] {
+    func frames(appearance: NSAppearance? = nil, level: Int = 0) -> [NSImage] {
         (0..<frameCount).map { i in
             let scale: CGFloat = 2
             let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
@@ -289,7 +290,7 @@ struct Runner {
             NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
             let render = {
                 NSColor.black.setFill(); NSColor.black.setStroke()
-                self.draw(Double(i) / Double(self.frameCount) * 2 * .pi)
+                self.draw(Double(i) / Double(self.frameCount) * 2 * .pi, level)
             }
             if let appearance { appearance.performAsCurrentDrawingAppearance(render) } else { render() }
             NSGraphicsContext.restoreGraphicsState()
@@ -300,12 +301,14 @@ struct Runner {
         }
     }
 
-    static let all: [Runner] = [cat, coffee, rainbow, pixelCat, rocketCat]
+    static let all: [Runner] = [coffee, rocketCat, fan, pulse, bars]
 
-    // 橘猫火箭（原创彩色像素画）：橘猫骑着小火箭，尾焰闪烁，星星一闪一闪
-    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 6, size: NSSize(width: 36, height: 20), template: false) { t in
+    // 橘猫火箭（原创彩色像素画）：橘猫骑着小火箭，尾焰闪烁，星星一闪一闪；占用率越高尾焰越长、闪得越快
+    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 12, size: NSSize(width: 36, height: 20), template: false, levels: 3) { t, level in
         let W = 36, H = 20
-        let f = Int((t / (2 * .pi) * 6).rounded()) % 6
+        let f12 = Int((t / (2 * .pi) * 12).rounded()) % 12
+        let f = f12 % 6                                  // 颠簸、尾巴：每帧走 1 步
+        let g = Int(Double(f12) * [1, 1.5, 2][level]) % 6   // 尾焰、星星：每帧走 1 / 1.5 / 2 步（12 帧走 12 / 18 / 24 步，循环无缝）
         func c(_ r: Double, _ g: Double, _ b: Double) -> NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: 1) }
         let orange = c(0.97, 0.60, 0.20), stripe = c(0.82, 0.40, 0.10), white = c(0.99, 0.97, 0.93)
         let pink = c(0.99, 0.56, 0.66), eye = c(0.10, 0.09, 0.12), outline = c(0.16, 0.13, 0.18)
@@ -356,9 +359,10 @@ struct Runner {
             if n.contains(where: { $0.0 >= 0 && $0.0 < W && $0.1 >= 0 && $0.1 < H && solid[$0.1][$0.0] }) { grid[y][x] = outline }
         } }
 
-        // —— 尾焰（不描边）：黄 → 橙 → 红，长度闪动
-        let len = [6, 8, 7, 9, 6, 8][f]
-        for (dy, short) in [(11, 2), (12, 0), (13, 2)] {
+        // —— 尾焰（不描边）：黄 → 橙 → 红，长度闪动；高档长短交替更猛，上下再加两道
+        let len = [[4, 5, 5, 6, 5, 4], [6, 8, 7, 9, 6, 8], [10, 7, 10, 8, 10, 7]][level][g]
+        let rows = level == 2 ? [(10, 4), (11, 1), (12, 0), (13, 1), (14, 4)] : [(11, 2), (12, 0), (13, 2)]
+        for (dy, short) in rows {
             let l = len - short
             for i in 0..<max(l, 0) {
                 let x = 9 - i
@@ -374,7 +378,7 @@ struct Runner {
 
         // —— 星星：一闪一闪，亮时是十字
         for (sx, sy, ph) in [(3, 3, 0), (32, 2, 2), (6, 18, 4), (34, 17, 1)] {
-            let phase = (f + ph) % 6
+            let phase = (g + ph) % 6
             guard phase < 4 else { continue }
             let col = NSColor(srgbRed: 1, green: 0.78, blue: 0.18, alpha: phase == 1 ? 1 : 0.75)   // 暖黄，浅色背景也看得见
             col.setFill()
@@ -385,187 +389,8 @@ struct Runner {
         }
     }
 
-    // 像素猫（原创像素格）：单色胖像素猫 + 深浅交替的像素条纹尾迹，模板图随菜单栏变色
-    static let pixelCat = Runner(id: "pixel", name: "像素猫|Pixel Cat", frameCount: 6, size: NSSize(width: 34, height: 16)) { t in
-        let ctx = NSGraphicsContext.current!.cgContext
-        ctx.setShouldAntialias(false)
-        let f = Int((t / (2 * .pi) * 6).rounded()) % 6
-        func px(_ x: Int, _ y: Int, _ a: CGFloat = 1) {          // y 从上往下数（0 = 顶）
-            NSColor.black.withAlphaComponent(a).setFill()
-            NSRect(x: x, y: 15 - y, width: 1, height: 1).fill()
-        }
-        let bob = f % 2                                          // 身体一上一下
-
-        // 尾迹：6 条深浅交替的条纹，每 4 格一段，段与段错开 1 格、随帧跳动
-        let stripeAlpha: [CGFloat] = [1, 0.5, 1, 0.5, 1, 0.5]
-        for seg in 0..<4 {
-            let dy = (seg + f) % 2
-            for (row, a) in stripeAlpha.enumerated() {
-                for x in (seg * 4)..<(seg * 4 + 4) { px(x, 4 + row + dy + bob, a) }
-            }
-        }
-
-        // 猫（18 × 11 像素格，面朝右）；# 实心，. 空（眼睛是空出来的格子）
-        let body = [
-            "...........#....#",
-            "...........##..##",
-            "...........######",
-            "...........#.##.#",
-            "..###############",
-            ".################",
-            ".###############.",
-            ".##############..",
-            "..############...",
-        ]
-        let ox = 15, oy = 2 + bob
-        for (r, line) in body.enumerated() {
-            for (c, ch) in line.enumerated() where ch == "#" { px(ox + c, oy + r) }
-        }
-        // 尾巴：从屁股翘起，随帧上下摆
-        let tailUp = f % 3 == 0
-        px(ox + 1, oy + 3); px(ox, oy + (tailUp ? 2 : 3)); px(ox - 1, oy + (tailUp ? 1 : 3))
-        // 腿：两组交替迈步
-        let legs = f % 2 == 0 ? [2, 5, 9, 12] : [3, 6, 10, 13]
-        for c in legs { px(ox + c, oy + 9); px(ox + c + (f % 2 == 0 ? -1 : 1), oy + 10) }
-    }
-
-    // 彩虹猫（原创）：我们自己的奔跑小猫在空中飞，身后拖着波浪彩虹，周围小星星闪烁
-    static let rainbow = Runner(id: "rainbow", name: "彩虹猫|Rainbow Cat", frameCount: 12, size: NSSize(width: 42, height: 18), template: false) { t in
-        let ctx = NSGraphicsContext.current!.cgContext
-        // 彩虹：6 条色带，分成 3pt 一段，段与段上下错开并随时间起伏
-        let colors: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemGreen, .systemBlue, .systemPurple]
-        let band: CGFloat = 1.5, top: CGFloat = 13.8, trailEnd: CGFloat = 19
-        var x: CGFloat = 0, seg = 0
-        while x < trailEnd {
-            let dy = CGFloat(sin(t * 2 - Double(seg) * 0.9)) * 0.8
-            for (i, c) in colors.enumerated() {
-                c.setFill()
-                NSRect(x: x, y: top - band * CGFloat(i + 1) + dy, width: 3.2, height: band).fill()
-            }
-            x += 3; seg += 1
-        }
-        // 小星星：四角星，按相位闪烁
-        func star(_ cx: CGFloat, _ cy: CGFloat, _ phase: Double) {
-            let a = CGFloat(max(0, sin(t + phase)))
-            guard a > 0.05 else { return }
-            NSColor.labelColor.withAlphaComponent(a).setFill()
-            let r = 0.6 + 1.2 * a
-            let p = NSBezierPath()
-            p.move(to: NSPoint(x: cx, y: cy + r)); p.line(to: NSPoint(x: cx + 0.4, y: cy + 0.4))
-            p.line(to: NSPoint(x: cx + r, y: cy)); p.line(to: NSPoint(x: cx + 0.4, y: cy - 0.4))
-            p.line(to: NSPoint(x: cx, y: cy - r)); p.line(to: NSPoint(x: cx - 0.4, y: cy - 0.4))
-            p.line(to: NSPoint(x: cx - r, y: cy)); p.line(to: NSPoint(x: cx - 0.4, y: cy + 0.4))
-            p.close(); p.fill()
-        }
-        star(4, 16, 0); star(11, 2.5, 2.1); star(16, 16.5, 4.2); star(1.5, 3, 3.3)
-        // 猫：复用奔跑小猫，画进透明图层后整体染成菜单栏文字色（深浅色都看得清）
-        ctx.saveGState()
-        ctx.translateBy(x: 12, y: 0)
-        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-        NSColor.black.setFill(); NSColor.black.setStroke()
-        Runner.cat.draw(t)
-        NSGraphicsContext.current?.compositingOperation = .sourceAtop
-        NSColor.labelColor.setFill()
-        NSRect(x: -12, y: 0, width: 42, height: 18).fill()
-        NSGraphicsContext.current?.compositingOperation = .sourceOver
-        ctx.endTransparencyLayer()
-        ctx.restoreGState()
-    }
-
-    // 奔跑小猫
-    static let cat = Runner(id: "cat", name: "猫|Cat", frameCount: 12, size: NSSize(width: 30, height: 18)) { t in
-        // 奔跑周期：s = +1 舒展腾空，s = -1 四腿收拢、拱背
-        let s = sin(t), c = cos(t)
-        let lift = 0.5 + 0.5 * s
-        let hip      = NSPoint(x: 10.0 - s * 0.9, y: 8.4 + lift + c * 0.4)
-        let shoulder = NSPoint(x: 19.6 + s * 0.9, y: 8.6 + lift - c * 0.4)
-        let arch = (1 - s) * 1.1
-
-        // 粗细渐变的线（腿、尾巴）：沿折线逐段变细，圆头相接
-        func tapered(_ pts: [NSPoint], _ widths: [CGFloat]) {
-            for i in 0..<(pts.count - 1) {
-                let p = NSBezierPath()
-                p.lineCapStyle = .round
-                p.lineWidth = widths[i]
-                p.move(to: pts[i]); p.line(to: pts[i + 1]); p.stroke()
-            }
-        }
-        // 腿：大腿粗 → 小腿细 → 小爪
-        func leg(_ root: NSPoint, thigh a1: Double, shin a2: Double, len: (Double, Double), w: CGFloat, far: Bool) {
-            let k = NSPoint(x: root.x + sin(a1) * len.0, y: root.y - cos(a1) * len.0)
-            var f = NSPoint(x: k.x + sin(a2) * len.1, y: k.y - cos(a2) * len.1)
-            f.y = max(1.0, f.y)
-            NSColor.black.withAlphaComponent(far ? 0.55 : 1).setStroke()
-            NSColor.black.withAlphaComponent(far ? 0.55 : 1).setFill()
-            tapered([root, k, f], [w, w * 0.62])
-            NSBezierPath(ovalIn: NSRect(x: f.x - 1.1, y: f.y - 0.9, width: 2.4, height: 1.6)).fill()   // 爪
-            NSColor.black.setStroke(); NSColor.black.setFill()
-        }
-        // 前腿：肩部向前伸 / 向后收，肘在下，腕部略向后折
-        func front(_ p: Double) -> (Double, Double) { let a = 0.2 + sin(p) * 0.65; return (a, a - 0.25 - 0.35 * max(0, -sin(p))) }
-        // 后腿：大腿向前收 / 向后蹬，跗关节向后折（猫腿特征）
-        func back(_ p: Double) -> (Double, Double) { let a = -0.15 - sin(p) * 0.6; return (a + 0.35, a - 0.45) }
-
-        // 远侧两条腿（半透明，做出前后层次）
-        let ff = front(t - 0.7), bf = back(t - 0.7)
-        let cg = NSGraphicsContext.current!.cgContext
-        cg.setAlpha(0.5)
-        cg.beginTransparencyLayer(auxiliaryInfo: nil)
-        leg(NSPoint(x: shoulder.x - 0.6, y: shoulder.y - 0.6), thigh: ff.0, shin: ff.1, len: (3.9, 3.6), w: 2.0, far: false)
-        leg(NSPoint(x: hip.x + 0.4, y: hip.y - 0.4), thigh: bf.0, shin: bf.1, len: (3.7, 4.0), w: 2.6, far: false)
-        cg.endTransparencyLayer()
-        cg.setAlpha(1)
-
-        // 尾巴：根部粗、尾尖细，S 形甩动
-        var tail: [NSPoint] = []
-        let tb = NSPoint(x: hip.x - 2.6, y: hip.y + 1.6)
-        for i in 0...6 {
-            let u = Double(i) / 6
-            tail.append(NSPoint(x: tb.x - u * 6.2,
-                                y: tb.y + u * 2.6 + sin(t - u * 2.2) * 1.5 * u))
-        }
-        tapered(tail, [2.0, 1.8, 1.6, 1.4, 1.2, 1.0])
-
-        // 身体：臀部 + 胸腔两团，中间收腰；背部可拱起
-        NSBezierPath(ovalIn: NSRect(x: hip.x - 3.6, y: hip.y - 3.0, width: 7.0, height: 6.4)).fill()
-        NSBezierPath(ovalIn: NSRect(x: shoulder.x - 3.4, y: shoulder.y - 3.2, width: 7.0, height: 6.8)).fill()
-        let torso = NSBezierPath()
-        torso.move(to: NSPoint(x: hip.x, y: hip.y + 3.1))
-        torso.curve(to: NSPoint(x: shoulder.x, y: shoulder.y + 3.3),
-                    controlPoint1: NSPoint(x: hip.x + 3, y: hip.y + 3.3 + arch),
-                    controlPoint2: NSPoint(x: shoulder.x - 3, y: shoulder.y + 3.4 + arch))
-        torso.line(to: NSPoint(x: shoulder.x, y: shoulder.y - 2.6))
-        torso.curve(to: NSPoint(x: hip.x, y: hip.y - 2.2),                       // 腹部微微上收
-                    controlPoint1: NSPoint(x: shoulder.x - 3, y: shoulder.y - 1.6 + arch * 0.5),
-                    controlPoint2: NSPoint(x: hip.x + 3, y: hip.y - 1.4 + arch * 0.5))
-        torso.close(); torso.fill()
-
-        // 头：圆脑袋 + 吻部 + 竖起的耳朵，跟着肩膀点头
-        let hc = NSPoint(x: shoulder.x + 4.4, y: shoulder.y + 3.0 + c * 0.3)
-        let neck = NSBezierPath()
-        neck.lineWidth = 4.2; neck.lineCapStyle = .round
-        neck.move(to: NSPoint(x: shoulder.x + 1, y: shoulder.y + 1)); neck.line(to: hc); neck.stroke()
-        NSBezierPath(ovalIn: NSRect(x: hc.x - 3.0, y: hc.y - 2.6, width: 6.0, height: 5.4)).fill()
-        NSBezierPath(ovalIn: NSRect(x: hc.x + 1.2, y: hc.y - 2.3, width: 3.4, height: 2.8)).fill()     // 吻部
-        let ears = NSBezierPath()
-        ears.move(to: NSPoint(x: hc.x - 2.5, y: hc.y + 1.5)); ears.line(to: NSPoint(x: hc.x - 2.0, y: hc.y + 5.0)); ears.line(to: NSPoint(x: hc.x - 0.1, y: hc.y + 2.6))
-        ears.move(to: NSPoint(x: hc.x + 0.5, y: hc.y + 2.7)); ears.line(to: NSPoint(x: hc.x + 1.9, y: hc.y + 5.2)); ears.line(to: NSPoint(x: hc.x + 2.9, y: hc.y + 1.6))
-        ears.close(); ears.fill()
-        punch {
-            NSBezierPath(ovalIn: NSRect(x: hc.x + 0.9, y: hc.y + 0.3, width: 1.3, height: 1.6)).fill()   // 眼睛
-            let ear = NSBezierPath()   // 耳朵内侧
-            ear.move(to: NSPoint(x: hc.x + 1.1, y: hc.y + 2.9)); ear.line(to: NSPoint(x: hc.x + 1.8, y: hc.y + 4.2)); ear.line(to: NSPoint(x: hc.x + 2.3, y: hc.y + 2.6))
-            ear.close(); ear.fill()
-        }
-
-        // 近侧两条腿
-        let fn = front(t), bn = back(t)
-        leg(shoulder, thigh: fn.0, shin: fn.1, len: (3.9, 3.6), w: 2.2, far: false)
-        leg(NSPoint(x: hip.x - 0.4, y: hip.y), thigh: bn.0, shin: bn.1, len: (3.7, 4.0), w: 3.0, far: false)
-    }
-
-    // 一杯咖啡：圆润杯子 + 细节（杯沿、液面、高光），热气从整个杯口升起、往上收细变淡
-    static let coffee = Runner(id: "coffee", name: "咖啡|Coffee", frameCount: 12, size: NSSize(width: 22, height: 22)) { t in
+    // 一杯咖啡：圆润杯子 + 细节（杯沿、液面、高光），热气从整个杯口升起、往上收细变淡；占用率越高热气越多、升得越快
+    static let coffee = Runner(id: "coffee", name: "咖啡|Coffee", frameCount: 24, size: NSSize(width: 22, height: 22), levels: 3) { t, level in
         let ctx = NSGraphicsContext.current!.cgContext
         ctx.translateBy(x: 0.5, y: 0)                       // 左右留边
 
@@ -605,30 +430,111 @@ struct Runner {
         // 热气：从整个杯口升起，往上收成一缕，越高越淡
         let left = ax + (3.6 - ax) * K, right = ax + (14.4 - ax) * K
         let mid = (left + right) / 2, amp = (right - left) / 2 - 2.2
-        let base = 10.4 * K + 0.6, top = 20.6
-        let n = 40
-        let pts = (0...n).map { i -> NSPoint in
-            let u = Double(i) / Double(n)
-            return NSPoint(x: mid + sin(u * 1.25 * .pi - t) * (amp + 1) * pow(u, 1.1), y: base + u * (top - base))
+        let base = 10.4 * K + 0.6, top = [17.5, 20.6, 21.6][level]
+        let n = 40, tt = t * [2, 3, 4][level]                 // 24 帧摆动 2 / 3 / 4 次（每帧 ×1 / ×1.5 / ×2），循环无缝
+        // 一缕热气：沿中心线叠扁椭圆，形状平滑不翻折；高档两侧再各冒一缕细的
+        func wisp(_ dx: Double, _ ph: Double, _ ws: Double, _ topY: Double) -> NSBezierPath {
+            let path = NSBezierPath()
+            for i in 0...n {
+                let u = Double(i) / Double(n)
+                let x = mid + dx * (1 - u * 0.5) + sin(u * 1.25 * .pi - tt + ph) * (amp + 1) * ws * pow(u, 1.1), y = base + u * (topY - base)
+                let w = ((right - left - 1.0) * pow(1 - u, 2.2) + 1.8) * ws, h = 1.2 + u * 0.4
+                path.append(NSBezierPath(ovalIn: NSRect(x: x - w / 2, y: y - h / 2, width: w, height: h)))
+            }
+            return path
         }
-        func width(_ u: Double) -> Double { (right - left - 1.0) * pow(1 - u, 2.2) + 1.8 }
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-        // 沿中心线叠扁椭圆，形状平滑不翻折
-        let steam = NSBezierPath()
-        for i in 0...n {
-            let u = Double(i) / Double(n), w = width(u), h = 1.2 + u * 0.4
-            steam.append(NSBezierPath(ovalIn: NSRect(x: pts[i].x - w / 2, y: pts[i].y - h / 2, width: w, height: h)))
-        }
+        let steam = wisp(0, 0, 1, top)
+        if level == 2 { steam.append(wisp(-4.2, .pi, 0.45, top - 2)); steam.append(wisp(4.2, .pi / 2, 0.45, top - 3)) }
         ctx.saveGState()
         NSBezierPath(rect: NSRect(x: -1, y: base, width: 24, height: 22)).addClip()
         steam.fill()
         ctx.restoreGState()
         NSGraphicsContext.current?.compositingOperation = .destinationIn
-        NSGradient(starting: NSColor.black.withAlphaComponent(0.6), ending: NSColor.black.withAlphaComponent(0.3))!
+        let alpha = [0.4, 0.6, 0.8][level]
+        NSGradient(starting: NSColor.black.withAlphaComponent(alpha), ending: NSColor.black.withAlphaComponent(alpha / 2))!
             .draw(in: NSRect(x: -1, y: base - 2, width: 24, height: 24 - base), angle: 90)
         NSGraphicsContext.current?.compositingOperation = .sourceOver
         ctx.endTransparencyLayer()
     }
+}
+
+// MARK: - 更多 Runner（矢量绘制，非像素）
+private func pt(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: x, y: y) }
+
+extension Runner {
+    // 小风扇：四片弯叶片顺时针转，带淡淡的残影；占用率越高每帧转得越多（×1 / ×1.5 / ×2）、残影越长
+    static let fan = Runner(id: "fan", name: "风扇|Fan", frameCount: 24, size: NSSize(width: 20, height: 20), levels: 3) { t, level in
+        let ctx = NSGraphicsContext.current!.cgContext
+        let ring = NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 18, height: 18))
+        ring.lineWidth = 1.3; ring.stroke()
+        for k in 0..<4 {
+            let trail: [(Double, Double)] = [[(0.35, 0.22)], [(0.6, 0.12), (0.3, 0.26)], [(0.9, 0.08), (0.6, 0.16), (0.3, 0.3)]][level]
+            for (off, a) in trail + [(0.0, 1.0)] {             // 先画残影，再画叶片
+                ctx.saveGState()
+                ctx.translateBy(x: 10, y: 10)
+                ctx.rotate(by: CGFloat(-t / 2 * [1, 1.5, 2][level] + Double(k) * .pi / 2 + off))   // 4 重对称：24 帧转 1/2、3/4、1 圈
+                let b = NSBezierPath()
+                b.move(to: pt(-0.8, 1.6))
+                b.curve(to: pt(-0.2, 7.6), controlPoint1: pt(-2.6, 4.2), controlPoint2: pt(-2.4, 7.0))
+                b.curve(to: pt(3.8, 5.6), controlPoint1: pt(1.6, 8.6), controlPoint2: pt(3.6, 7.6))
+                b.curve(to: pt(0.9, 1.6), controlPoint1: pt(3.6, 4.0), controlPoint2: pt(2.0, 2.4))
+                b.close()
+                NSColor.black.withAlphaComponent(a).setFill(); b.fill()
+                ctx.restoreGState()
+            }
+        }
+        NSColor.black.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 7.6, y: 7.6, width: 4.8, height: 4.8)).fill()            // 轴心
+        punch { NSBezierPath(ovalIn: NSRect(x: 9.1, y: 9.1, width: 1.8, height: 1.8)).fill() }
+    }
+
+    // 心电图：波形向左滚动，左侧渐隐，右端一个亮点；占用率越高档位越高，窗口里的心跳越密（1 / 2 / 3 拍）、滚得越快（每帧 ×1 / ×1.5 / ×2），每拍高低不一，档位越高峰越高
+    static let pulse = Runner(id: "pulse", name: "心电图|Heartbeat", frameCount: 45, size: NSSize(width: 30, height: 18), levels: 3) { t, level in
+        let ctx = NSGraphicsContext.current!.cgContext
+        // 一圈帧滚过 90×m 个单位（m = 1 / 1.5 / 2）= 3 / 9 / 18 拍，循环无缝；拍子变密时波形横向压缩
+        let m = [1, 1.5, 2][level]
+        let period = 30.0 / Double(level + 1), sx = [1, 0.6, 0.42][level], off = t / (2 * .pi) * 90 * m, base = 5.0
+        let beats = Int(3 * m * Double(level + 1))
+        let amps = [1.0, 0.8, 0.92, 0.72, 0.97, 0.84, 0.88, 0.76, 0.94]   // 每拍的幅度
+        let scale = [0.7, 0.9, 1.15][level]                                 // 档位整体高度
+        let keys: [(Double, Double)] = [(0, 0), (4, 0), (5.5, 1.3), (7, 0), (10, 0), (11, -1.3), (12.6, 9.5), (14.2, -3.2),
+                                        (15.6, 0), (18, 0), (20, 2.0), (22.5, 0)].map { ($0.0 * sx, $0.1) } + [(period, 0)]
+        func ecg(_ x: Double) -> Double {
+            let p = x + off, u = p.truncatingRemainder(dividingBy: period)
+            let amp = scale * amps[Int(p / period) % beats % amps.count]
+            for i in 0..<(keys.count - 1) where u >= keys[i].0 && u <= keys[i + 1].0 {
+                let (a, va) = keys[i], (b, vb) = keys[i + 1]
+                return base + amp * (va + (vb - va) * (u - a) / (b - a))
+            }
+            return base
+        }
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        let line = NSBezierPath()
+        line.lineWidth = 1.5; line.lineCapStyle = .round; line.lineJoinStyle = .round
+        line.move(to: pt(1.5, ecg(0)))
+        for i in 1...108 { let x = Double(i) * 0.25; line.line(to: pt(x + 1.5, ecg(x))) }
+        line.stroke()
+        NSGraphicsContext.current?.compositingOperation = .destinationIn
+        NSGradient(colorsAndLocations: (NSColor.black.withAlphaComponent(0), 0), (NSColor.black, 0.55), (NSColor.black, 1))!
+            .draw(in: NSRect(x: 0, y: 0, width: 30, height: 18), angle: 0)
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        ctx.endTransparencyLayer()
+        let y = ecg(27)
+        NSBezierPath(ovalIn: NSRect(x: 27.1, y: y - 1.4, width: 2.8, height: 2.8)).fill()
+    }
+
+    // 音波：五根圆头竖条随节奏跳动；占用率越高跳得越高、越密
+    static let bars = Runner(id: "bars", name: "音波|Sound Wave", frameCount: 24, size: NSSize(width: 22, height: 18), levels: 3) { t, level in
+        let phase = [0, 2.1, 4.0, 1.1, 3.1], k = [1.0, 2, 1, 3, 2], f = [2.0, 3, 4][level]   // 24 帧：频率 ×2 / ×3 / ×4 取整，每帧 ×1 / ×1.5 / ×2，循环无缝
+        let span = [7.0, 10.5, 14.5][level]                   // 跳动幅度
+        for i in 0..<5 {
+            let v = 0.5 + 0.32 * sin(k[i] * f * t + phase[i]) + 0.18 * sin((k[i] + 1) * f * t + phase[i] * 1.7)
+            let h = 2.6 + v * span
+            NSBezierPath(roundedRect: NSRect(x: 1.6 + Double(i) * 3.9, y: 9 - h / 2, width: 2.8, height: h), xRadius: 1.4, yRadius: 1.4).fill()
+        }
+    }
+
 }
 
 // MARK: - 温度（读取系统 HID 温度传感器，无需管理员权限）
@@ -2353,6 +2259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var animTimer: Timer?
     private var sampleTimer: Timer?
     private var usage = 0.0
+    private var runLevel = 0
 
     /// 菜单栏文字显示什么
     /// 菜单栏旁边显示什么；默认不显示（只有 runner 图标）
@@ -2385,7 +2292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let dark = b.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             guard dark != self.lastDark else { return }
             self.lastDark = dark
-            self.frames = self.runner.frames(appearance: b.effectiveAppearance)
+            self.frames = self.runner.frames(appearance: b.effectiveAppearance, level: self.runLevel)
             self.installRunAnimation()                 // 单色 runner 重新上色（深色 → 白，浅色 → 黑）
         }
         installRunAnimation()
@@ -2523,7 +2430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch key {
         case "runner":
             guard let r = Runner.all.first(where: { $0.id == id }) else { return }
-            runner = r; frames = r.frames(appearance: statusItem.button?.effectiveAppearance); frameIndex = 0
+            runner = r; runLevel = 0; frames = r.frames(appearance: statusItem.button?.effectiveAppearance); frameIndex = 0
             UserDefaults.standard.set(id, forKey: "runner")
             updateStatusImage()
             installRunAnimation()
@@ -2831,12 +2738,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// CPU 越高跑得越快：0% → 4 帧/秒，100% → 40 帧/秒（指数变化）
+    /// CPU 越高跑得越快：0% → 4 帧/秒，50% → 16，100% → 25（两段指数变化）
     private func scheduleAnimation() {
-        // 跟随占用率，按“倍数”变化（人眼感知速度看的是快了几倍）：0% → 4，50% → 13，70% → 20，100% → 40 帧/秒
+        // 跟随占用率，按“倍数”变化（人眼感知速度看的是快了几倍）：前半段 4 → 16 涨得快，后半段 16 → 25 放缓，高占用时不至于太晃
         // 动画由图层在渲染服务器里播放，帧率高低几乎不影响 CPU
         let u = min(max(usage, 0), 1)
-        let fps = 4 * pow(10, u)
+        let fps = u <= 0.5 ? 4 * pow(4, u * 2) : 16 * pow(25.0 / 16, u * 2 - 1)
+        // 分档 runner：越过档位边界 0.1 才换档，避免占用率在边界附近抖动时反复换帧
+        let raw = u * Double(runner.levels)
+        if runner.levels > 1, abs(raw - (Double(runLevel) + 0.5)) > 0.6 {
+            runLevel = min(Int(raw), runner.levels - 1)
+            frames = runner.frames(appearance: statusItem.button?.effectiveAppearance, level: runLevel)
+            installRunAnimation()
+        }
         let interval = 1 / fps
         if CommandLine.arguments.contains("--fps-log") { NSLog("fps debug: usage=%.0f%% fps=%.1f", u * 100, fps) }
         _ = interval
@@ -2873,18 +2787,21 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--stats" {
     exit(0)
 }
 
-// MenuRunner --runner <id> out.png：单个 runner 放大 12 倍，上行深色背景、下行浅色背景
+// MenuRunner --runner <id> out.png：单个 runner 放大 12 倍，每档两行：深色背景、浅色背景
 if CommandLine.arguments.count == 4, CommandLine.arguments[1] == "--runner",
    let r = Runner.all.first(where: { $0.id == CommandLine.arguments[2] }) {
     let sc: CGFloat = 12, fw = r.size.width * sc, fh = r.size.height * sc
-    let frames = r.frames()
-    let sheet = NSImage(size: NSSize(width: fw * CGFloat(frames.count), height: fh * 2), flipped: true) { _ in
-        for (row, bg) in [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.93, alpha: 1)].enumerated() {
-            bg.setFill(); NSRect(x: 0, y: CGFloat(row) * fh, width: fw * CGFloat(frames.count), height: fh).fill()
-            NSGraphicsContext.current?.imageInterpolation = .none
-            for (i, img) in frames.enumerated() {
-                img.draw(in: NSRect(x: CGFloat(i) * fw, y: CGFloat(row) * fh, width: fw, height: fh), from: .zero,
-                         operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+    let sheet = NSImage(size: NSSize(width: fw * CGFloat(r.frameCount), height: fh * 2 * CGFloat(r.levels)), flipped: true) { _ in
+        for level in 0..<r.levels {
+            let frames = r.frames(level: level)
+            for (k, bg) in [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.93, alpha: 1)].enumerated() {
+                let row = level * 2 + k
+                bg.setFill(); NSRect(x: 0, y: CGFloat(row) * fh, width: fw * CGFloat(frames.count), height: fh).fill()
+                NSGraphicsContext.current?.imageInterpolation = .none
+                for (i, img) in frames.enumerated() {
+                    img.draw(in: NSRect(x: CGFloat(i) * fw, y: CGFloat(row) * fh, width: fw, height: fh), from: .zero,
+                             operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                }
             }
         }
         return true
@@ -2975,12 +2892,13 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--icon" {
 }
 
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--preview" {
-    let sc = 8.0, w = Runner.all.map { $0.size.width * CGFloat($0.frameCount) }.max()!
+    let maxFrames = 15                                   // 帧多的 runner（心电图 45 帧）只画前 15 帧，图别太宽
+    let sc = 8.0, w = Runner.all.map { $0.size.width * CGFloat(min($0.frameCount, maxFrames)) }.max()!
     let rowH = 22.0, rows = Double(Runner.all.count)
     let sheet = NSImage(size: NSSize(width: w * sc, height: rowH * sc * rows), flipped: true) { _ in
         NSColor.white.setFill(); NSRect(x: 0, y: 0, width: w * sc, height: rowH * sc * rows).fill()
         for (row, r) in Runner.all.enumerated() {
-            for (i, f) in r.frames().enumerated() {
+            for (i, f) in r.frames().prefix(maxFrames).enumerated() {
                 f.draw(in: NSRect(x: Double(i) * r.size.width * sc, y: Double(row) * rowH * sc, width: r.size.width * sc, height: r.size.height * sc),
                        from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             }

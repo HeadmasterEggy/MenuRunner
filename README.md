@@ -25,7 +25,7 @@
 
 ## Features
 
-- **Runners** — a galloping cat, a steaming coffee cup a rainbow cat (our cat flying with a waving rainbow trail and twinkling stars) a monochrome pixel cat with a stepped stripe trail, and a colour pixel-art Rocket Cat (an orange tabby riding a rocket with a flickering flame) — all original designs, drawn in code as template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
+- **Runners** — a steaming coffee cup, a colour pixel-art Rocket Cat (an orange tabby riding a rocket with a flickering flame), a spinning fan, a scrolling heartbeat line and bouncing sound-wave bars — all original designs, drawn in code; the monochrome ones are template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage, in three clearly different levels: the fan spins faster with a longer trail, the bars jump higher, the steam thickens, the rocket flame grows and the heartbeat packs in more, taller beats.
 - **Menu bar metrics with live mini graphs** — CPU, GPU, memory, battery, network, SoC or battery temperature. Choose *Graph + Number*, *Graph only* or *Number only*.
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
   - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version
@@ -35,7 +35,7 @@
   - Temperatures — SoC, battery, SSD
   - Network upload / download speed
   - **Click any card for details** (with smooth slide / fade transitions) — app disk usage largest-first, per-core CPU and top apps by CPU, GPU utilization and top apps by GPU, memory by app, every temperature sensor, all volumes, full battery info (capacity, voltage, power, adapter), network interfaces and top apps by traffic, full machine spec
-- **Settings** — refresh rate (0.5 s / 1 s / 2 s), °C / °F, English / 简体中文, launch at login, open Activity Monitor.
+- **Settings** — refresh rate (0.5 s / 1 s / 2 s), °C / °F, English / Simplified Chinese, launch at login, open Activity Monitor.
 
 ## Install
 
