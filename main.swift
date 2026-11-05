@@ -860,7 +860,6 @@ enum ProcessMemory {
 // MARK: - 详情页数据（每张卡片点进去看到的内容）
 struct AppStat { var name: String, path: String?, value: Double, processes: Int }
 struct NetInterface { var bsd: String, name: String, ipv4: String, up: Double, down: Double }
-struct DiskProc { var pid: pid_t, name: String, path: String?, read: Double, write: Double }
 struct VolumeInfo { var name: String, path: String, used: Double, total: Double }
 
 enum DetailKind { case system, cpu, gpu, memory, temps, storage, battery, network }
@@ -878,20 +877,6 @@ enum AppIdentity {
     static func prune(_ alive: [pid_t]) {
         let set = Set(alive)
         cache = cache.filter { set.contains($0.key) }
-        procCache = procCache.filter { set.contains($0.key) }
-    }
-
-    /// 单个进程：可执行文件名 + 所属应用路径（用于图标 / 在访达中显示）
-    private static var procCache: [pid_t: (name: String, path: String?)] = [:]
-    static func process(_ pid: pid_t) -> (name: String, path: String?) {
-        if let c = procCache[pid] { return c }
-        var buf = [CChar](repeating: 0, count: 4096)
-        let len = proc_pidpath(pid, &buf, UInt32(buf.count))
-        let path = len > 0 ? String(cString: buf) : ""
-        var name = (path as NSString).lastPathComponent
-        if name.isEmpty { var nb = [CChar](repeating: 0, count: 256); proc_name(pid, &nb, UInt32(nb.count)); name = String(cString: nb) }
-        let v = (name, of(pid).path ?? (path.isEmpty ? nil : path))
-        procCache[pid] = v; return v
     }
 
     private static func lookup(_ pid: pid_t) -> (key: String, name: String, path: String?) {
@@ -934,7 +919,6 @@ enum AppIdentity {
 final class DetailProvider {
     var cores: [Double] = []
     var cpuApps: [AppStat] = [], gpuApps: [AppStat] = [], netApps: [AppStat] = []
-    var diskProcs: [DiskProc] = []
     var memApps: [AppMemory] = []
     var interfaces: [NetInterface] = []
     var volumes: [VolumeInfo] = []
@@ -944,7 +928,6 @@ final class DetailProvider {
 
     private var prevCores: [Int32]?
     private var prevCPU: [pid_t: UInt64] = [:], prevGPU: [pid_t: UInt64] = [:]
-    private var prevDisk: [pid_t: (UInt64, UInt64)] = [:]
     private var prevIf: [String: (UInt64, UInt64)] = [:]
     private let timebase: Double = { var tb = mach_timebase_info(); mach_timebase_info(&tb); return Double(tb.numer) / Double(tb.denom) }()
     private lazy var ifNames: [String: String] = {
@@ -959,7 +942,7 @@ final class DetailProvider {
     func resetAll() { stopNetwork(); prevCores = nil; prevCPU = [:]; prevGPU = [:]; prevIf = [:]; sampled = false
                    cores = []; cpuApps = []; gpuApps = []; netApps = [] }
 
-    private var tCPU: CFTimeInterval = 0, tGPU: CFTimeInterval = 0, tIf: CFTimeInterval = 0, tDisk: CFTimeInterval = 0
+    private var tCPU: CFTimeInterval = 0, tGPU: CFTimeInterval = 0, tIf: CFTimeInterval = 0
     private func dt(_ t: inout CFTimeInterval) -> Double {
         let now = CACurrentMediaTime(); defer { t = now }
         return max(now - t, 0.001)
@@ -967,7 +950,7 @@ final class DetailProvider {
 
     /// 面板打开时先记一份基准：之后点进 CPU / GPU / 网络，马上就能算出速度，不用再等一轮
     func prime() {
-        refreshCores(); refreshCPUApps(dt(&tCPU)); refreshGPU(dt(&tGPU)); refreshInterfaces(dt(&tIf)); refreshDiskProcs(dt(&tDisk))
+        refreshCores(); refreshCPUApps(dt(&tCPU)); refreshGPU(dt(&tGPU)); refreshInterfaces(dt(&tIf))
     }
 
     func prewarmStorage() { refreshAppSizes() }
@@ -978,7 +961,7 @@ final class DetailProvider {
         case .gpu:     refreshGPU(dt(&tGPU))
         case .memory:  memApps = ProcessMemory.top(PanelController.procRows)
         case .temps:   sensors = TempMonitor.shared.readAll()
-        case .storage: refreshVolumes(); refreshAppSizes(); refreshDiskProcs(dt(&tDisk))
+        case .storage: refreshVolumes(); refreshAppSizes()
         case .network: refreshInterfaces(dt(&tIf)); refreshNetApps()
         default: break
         }
@@ -1015,25 +998,6 @@ final class DetailProvider {
         }
         if !prevCPU.isEmpty { cpuApps = AppIdentity.group(rate, limit: 8) }
         prevCPU = cur
-    }
-
-    // 各进程磁盘读写速度（不按应用合并：看具体是哪个进程在读写）
-    private func refreshDiskProcs(_ dt: Double) {
-        var cur: [pid_t: (UInt64, UInt64)] = [:], list: [DiskProc] = []
-        for pid in AppIdentity.allPids() {
-            var u = rusage_info_current()
-            let r = withUnsafeMutablePointer(to: &u) { $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, $0) } }
-            guard r == 0 else { continue }   // root 进程无权限读取，跳过
-            let v = (u.ri_diskio_bytesread, u.ri_diskio_byteswritten)
-            cur[pid] = v
-            guard let p = prevDisk[pid], v.0 >= p.0, v.1 >= p.1 else { continue }
-            let rd = Double(v.0 - p.0) / dt, wr = Double(v.1 - p.1) / dt
-            guard rd + wr > 0 else { continue }
-            let id = AppIdentity.process(pid)
-            list.append(DiskProc(pid: pid, name: id.name, path: id.path, read: rd, write: wr))
-        }
-        if !prevDisk.isEmpty { diskProcs = Array(list.sorted { $0.read + $0.write > $1.read + $1.write }.prefix(PanelController.diskRows)) }
-        prevDisk = cur
     }
 
     // GPU：整体利用率 + 各应用（显卡驱动 AppUsage 里的累计 GPU 时间）
@@ -1183,7 +1147,7 @@ final class DetailProvider {
             }
             result.sort { $0.value > $1.value }
             DispatchQueue.main.async {
-                self?.appSizes = Array(result.prefix(8)); self?.sizeScanning = false; self?.sizeScanTime = CACurrentMediaTime()
+                self?.appSizes = Array(result.prefix(12)); self?.sizeScanning = false; self?.sizeScanTime = CACurrentMediaTime()
             }
         }
     }
@@ -1328,15 +1292,9 @@ extension NSColor {
 
 enum Draw {
     static func text(_ s: String, _ p: NSPoint, size: CGFloat = 12, weight: NSFont.Weight = .regular,
-                     color: NSColor = .labelColor, right: Bool = false, mono: Bool = false, maxWidth: CGFloat? = nil) {
+                     color: NSColor = .labelColor, right: Bool = false, mono: Bool = false) {
         let font = mono ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight) : NSFont.systemFont(ofSize: size, weight: weight)
         let str = NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color])
-        if let mw = maxWidth, str.size().width > mw {   // 太长：末尾省略号
-            let ps = NSMutableParagraphStyle(); ps.lineBreakMode = .byTruncatingTail
-            NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: ps])
-                .draw(with: NSRect(x: p.x, y: p.y, width: mw, height: str.size().height), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-            return
-        }
         str.draw(at: NSPoint(x: right ? p.x - str.size().width : p.x, y: p.y))
     }
 
@@ -1579,7 +1537,6 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     // MARK: 详情页（每张卡片都能点进去）
     static let procRows = 10
-    static let diskRows = 8
     let detail = DetailProvider()
     private var detailKind: DetailKind = .memory
     private var detailPages: [String: Page] = [:]
@@ -1647,8 +1604,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             case .memory:  rows.append((CGFloat(Self.procRows) * 30 + 44, [(0, W, drawProcessList, nil)]))
             case .temps:   rows.append((CGFloat(max(1, min(14, (detail.sensors.count + 1) / 2))) * 22 + 24, [(0, W, drawSensors, nil)]))
             case .storage: rows += [(CGFloat(max(1, detail.volumes.count)) * 46 + 14, [(0, W, drawVolumes, nil)]),
-                                    (CGFloat(Self.diskRows) * 30 + 46, [(0, W, drawDiskProcs, nil)]),
-                                    (8 * 30 + 46, [(0, W, drawAppSizes, nil)])]
+                                    (12 * 30 + 46, [(0, W, drawAppSizes, nil)])]
             case .network: rows += [(CGFloat(max(1, detail.interfaces.count)) * 40 + 40, [(0, W, drawInterfaces, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("网络流量最大的应用", "Top apps by network"), self?.detail.netApps ?? [], { NetMonitor.format($0) }) }, nil)])]
             }
             let p = makePage(rows, button: { [weak self] card, _ in
@@ -1672,9 +1628,6 @@ final class PanelController: NSObject, NSPopoverDelegate {
                         return self.rowHit(pt, top: 36, paths: apps.map { $0.path })
                     }
                 default: break
-                }
-                if k == .storage, p.cards.count >= 2 {
-                    p.cards[p.cards.count - 2].rowAt = { [weak self] pt in self.flatMap { $0.rowHit(pt, top: 36, paths: $0.detail.diskProcs.map { $0.path }) } }
                 }
             }
             detailPages[key(k)] = p
@@ -1712,7 +1665,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         case .gpu:     return ("cpu.fill", .systemGreen, "GPU", m.gpu == nil ? "--" : Draw.pct(m.v("gpu")), spec.gpuCores > 0 ? L("\(spec.gpuCores) 核 GPU", "\(spec.gpuCores)-core GPU") : "")
         case .memory:  return ("memorychip", .systemPurple, L("内存占用", "Memory Usage"), "\(SystemInfo.gb(m.memory.used)) / \(SystemInfo.gb(m.memory.total))", L("按应用汇总", "Grouped by app"))
         case .temps:   return ("thermometer.medium", .systemOrange, L("温度传感器", "Temperature Sensors"), m.temps.soc.map { TempUnit.format($0) } ?? "--", L("\(detail.sensors.count) 个传感器", "\(detail.sensors.count) sensors"))
-        case .storage: return ("internaldrive", .systemIndigo, L("存储", "Storage"), m.storage.map { Draw.pct($0.used / $0.total) } ?? "--", L("卷 · 进程读写 · 应用大小", "Volumes · disk I/O · app sizes"))
+        case .storage: return ("internaldrive", .systemIndigo, L("存储", "Storage"), m.storage.map { Draw.pct($0.used / $0.total) } ?? "--", L("已挂载的卷", "Mounted volumes"))
         case .battery: return ("battery.100", .systemGreen, L("电池", "Battery"), m.battery.map { "\($0.percent)%" } ?? "--", m.battery.map { SystemInfo.stateText($0.state) } ?? "")
         case .network: return ("network", .systemTeal, L("网络", "Network"), "↓ " + NetMonitor.format(m.v("down")), "↑ " + NetMonitor.format(m.v("up")))
         }
@@ -1827,24 +1780,6 @@ final class PanelController: NSObject, NSPopoverDelegate {
         }
         // drawApps 会画标题；“×1” 不显示
         drawApps(w, L("应用占用空间（从大到小）", "Space used by apps (largest first)"), apps, { ProcessMemory.format(UInt64($0)) })
-    }
-
-    private func drawDiskProcs(_ w: CGFloat) {
-        sectionTitle(L("正在读写磁盘的进程", "Processes reading / writing disk"))
-        let ps = detail.diskProcs
-        guard !ps.isEmpty else {
-            Draw.text(detail.sampled ? L("暂无磁盘读写", "No disk activity") : L("采样中…", "Sampling…"), NSPoint(x: 14, y: 40), size: 11, color: .glassTertiary); return
-        }
-        let maxV = max(ps.first.map { $0.read + $0.write } ?? 1, 1)
-        var y: CGFloat = 36
-        for p in ps {
-            rowHighlight(y, w, clickable: p.path != nil)
-            ProcessMemory.icon(p.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            Draw.text(p.name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium, maxWidth: w - 56 - 150)
-            Draw.text(L("读 ", "R ") + NetMonitor.format(p.read) + L("  写 ", "  W ") + NetMonitor.format(p.write), NSPoint(x: w - 14, y: y + 2), size: 10, color: .glassSecondary, right: true, mono: true)
-            Draw.bar(NSRect(x: 42, y: y + 20, width: w - 56, height: 3), (p.read + p.write) / maxV, .systemIndigo)
-            y += 30
-        }
     }
 
     private func drawVolumes(_ w: CGFloat) {
@@ -2833,8 +2768,6 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--stats" {
     print("temps soc", t.soc.map { String(format: "%.1f", $0) } ?? "nil", "battery", t.battery.map { String(format: "%.1f", $0) } ?? "nil",
           "ssd", t.ssd.map { String(format: "%.1f", $0) } ?? "nil")
     print("network up", NetMonitor.format(nr.up), "down", NetMonitor.format(nr.down))
-    let dp = DetailProvider(); dp.refresh(.storage); Thread.sleep(forTimeInterval: 1); dp.refresh(.storage)
-    for p in dp.diskProcs { print("disk", p.pid, p.name, "R", NetMonitor.format(p.read), "W", NetMonitor.format(p.write), p.path ?? "-") }
     for a in ProcessMemory.top(10) { print("  mem", ProcessMemory.format(a.bytes), "×\(a.processes)", a.name) }
     exit(0)
 }
