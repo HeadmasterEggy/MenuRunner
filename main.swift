@@ -303,10 +303,12 @@ struct Runner {
 
     static let all: [Runner] = [coffee, rocketCat, fan, pulse, bars]
 
-    // 橘猫火箭（原创彩色像素画）：橘猫骑着小火箭，尾焰闪烁，星星一闪一闪
-    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 6, size: NSSize(width: 36, height: 20), template: false) { t, _ in
+    // 橘猫火箭（原创彩色像素画）：橘猫骑着小火箭，尾焰闪烁，星星一闪一闪；占用率越高尾焰越长、闪得越快
+    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 12, size: NSSize(width: 36, height: 20), template: false, levels: 3) { t, level in
         let W = 36, H = 20
-        let f = Int((t / (2 * .pi) * 6).rounded()) % 6
+        let f12 = Int((t / (2 * .pi) * 12).rounded()) % 12
+        let f = f12 % 6                                  // 颠簸、尾巴：每帧走 1 步
+        let g = Int(Double(f12) * [1, 1.5, 2][level]) % 6   // 尾焰、星星：每帧走 1 / 1.5 / 2 步（12 帧走 12 / 18 / 24 步，循环无缝）
         func c(_ r: Double, _ g: Double, _ b: Double) -> NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: 1) }
         let orange = c(0.97, 0.60, 0.20), stripe = c(0.82, 0.40, 0.10), white = c(0.99, 0.97, 0.93)
         let pink = c(0.99, 0.56, 0.66), eye = c(0.10, 0.09, 0.12), outline = c(0.16, 0.13, 0.18)
@@ -357,9 +359,10 @@ struct Runner {
             if n.contains(where: { $0.0 >= 0 && $0.0 < W && $0.1 >= 0 && $0.1 < H && solid[$0.1][$0.0] }) { grid[y][x] = outline }
         } }
 
-        // —— 尾焰（不描边）：黄 → 橙 → 红，长度闪动
-        let len = [6, 8, 7, 9, 6, 8][f]
-        for (dy, short) in [(11, 2), (12, 0), (13, 2)] {
+        // —— 尾焰（不描边）：黄 → 橙 → 红，长度闪动；高档长短交替更猛，上下再加两道
+        let len = [[4, 5, 5, 6, 5, 4], [6, 8, 7, 9, 6, 8], [10, 7, 10, 8, 10, 7]][level][g]
+        let rows = level == 2 ? [(10, 4), (11, 1), (12, 0), (13, 1), (14, 4)] : [(11, 2), (12, 0), (13, 2)]
+        for (dy, short) in rows {
             let l = len - short
             for i in 0..<max(l, 0) {
                 let x = 9 - i
@@ -375,7 +378,7 @@ struct Runner {
 
         // —— 星星：一闪一闪，亮时是十字
         for (sx, sy, ph) in [(3, 3, 0), (32, 2, 2), (6, 18, 4), (34, 17, 1)] {
-            let phase = (f + ph) % 6
+            let phase = (g + ph) % 6
             guard phase < 4 else { continue }
             let col = NSColor(srgbRed: 1, green: 0.78, blue: 0.18, alpha: phase == 1 ? 1 : 0.75)   // 暖黄，浅色背景也看得见
             col.setFill()
@@ -386,8 +389,8 @@ struct Runner {
         }
     }
 
-    // 一杯咖啡：圆润杯子 + 细节（杯沿、液面、高光），热气从整个杯口升起、往上收细变淡
-    static let coffee = Runner(id: "coffee", name: "咖啡|Coffee", frameCount: 12, size: NSSize(width: 22, height: 22)) { t, _ in
+    // 一杯咖啡：圆润杯子 + 细节（杯沿、液面、高光），热气从整个杯口升起、往上收细变淡；占用率越高热气越多、升得越快
+    static let coffee = Runner(id: "coffee", name: "咖啡|Coffee", frameCount: 24, size: NSSize(width: 22, height: 22), levels: 3) { t, level in
         let ctx = NSGraphicsContext.current!.cgContext
         ctx.translateBy(x: 0.5, y: 0)                       // 左右留边
 
@@ -427,26 +430,29 @@ struct Runner {
         // 热气：从整个杯口升起，往上收成一缕，越高越淡
         let left = ax + (3.6 - ax) * K, right = ax + (14.4 - ax) * K
         let mid = (left + right) / 2, amp = (right - left) / 2 - 2.2
-        let base = 10.4 * K + 0.6, top = 20.6
-        let n = 40
-        let pts = (0...n).map { i -> NSPoint in
-            let u = Double(i) / Double(n)
-            return NSPoint(x: mid + sin(u * 1.25 * .pi - t) * (amp + 1) * pow(u, 1.1), y: base + u * (top - base))
+        let base = 10.4 * K + 0.6, top = [17.5, 20.6, 21.6][level]
+        let n = 40, tt = t * [2, 3, 4][level]                 // 24 帧摆动 2 / 3 / 4 次（每帧 ×1 / ×1.5 / ×2），循环无缝
+        // 一缕热气：沿中心线叠扁椭圆，形状平滑不翻折；高档两侧再各冒一缕细的
+        func wisp(_ dx: Double, _ ph: Double, _ ws: Double, _ topY: Double) -> NSBezierPath {
+            let path = NSBezierPath()
+            for i in 0...n {
+                let u = Double(i) / Double(n)
+                let x = mid + dx * (1 - u * 0.5) + sin(u * 1.25 * .pi - tt + ph) * (amp + 1) * ws * pow(u, 1.1), y = base + u * (topY - base)
+                let w = ((right - left - 1.0) * pow(1 - u, 2.2) + 1.8) * ws, h = 1.2 + u * 0.4
+                path.append(NSBezierPath(ovalIn: NSRect(x: x - w / 2, y: y - h / 2, width: w, height: h)))
+            }
+            return path
         }
-        func width(_ u: Double) -> Double { (right - left - 1.0) * pow(1 - u, 2.2) + 1.8 }
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-        // 沿中心线叠扁椭圆，形状平滑不翻折
-        let steam = NSBezierPath()
-        for i in 0...n {
-            let u = Double(i) / Double(n), w = width(u), h = 1.2 + u * 0.4
-            steam.append(NSBezierPath(ovalIn: NSRect(x: pts[i].x - w / 2, y: pts[i].y - h / 2, width: w, height: h)))
-        }
+        let steam = wisp(0, 0, 1, top)
+        if level == 2 { steam.append(wisp(-4.2, .pi, 0.45, top - 2)); steam.append(wisp(4.2, .pi / 2, 0.45, top - 3)) }
         ctx.saveGState()
         NSBezierPath(rect: NSRect(x: -1, y: base, width: 24, height: 22)).addClip()
         steam.fill()
         ctx.restoreGState()
         NSGraphicsContext.current?.compositingOperation = .destinationIn
-        NSGradient(starting: NSColor.black.withAlphaComponent(0.6), ending: NSColor.black.withAlphaComponent(0.3))!
+        let alpha = [0.4, 0.6, 0.8][level]
+        NSGradient(starting: NSColor.black.withAlphaComponent(alpha), ending: NSColor.black.withAlphaComponent(alpha / 2))!
             .draw(in: NSRect(x: -1, y: base - 2, width: 24, height: 24 - base), angle: 90)
         NSGraphicsContext.current?.compositingOperation = .sourceOver
         ctx.endTransparencyLayer()
@@ -457,16 +463,17 @@ struct Runner {
 private func pt(_ x: Double, _ y: Double) -> NSPoint { NSPoint(x: x, y: y) }
 
 extension Runner {
-    // 小风扇：四片弯叶片顺时针转，带一层淡淡的残影
-    static let fan = Runner(id: "fan", name: "风扇|Fan", frameCount: 12, size: NSSize(width: 20, height: 20)) { t, _ in
+    // 小风扇：四片弯叶片顺时针转，带淡淡的残影；占用率越高每帧转得越多（×1 / ×1.5 / ×2）、残影越长
+    static let fan = Runner(id: "fan", name: "风扇|Fan", frameCount: 24, size: NSSize(width: 20, height: 20), levels: 3) { t, level in
         let ctx = NSGraphicsContext.current!.cgContext
         let ring = NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 18, height: 18))
         ring.lineWidth = 1.3; ring.stroke()
         for k in 0..<4 {
-            for (off, a) in [(0.35, 0.22), (0.0, 1.0)] {       // 先画残影，再画叶片
+            let trail: [(Double, Double)] = [[(0.35, 0.22)], [(0.6, 0.12), (0.3, 0.26)], [(0.9, 0.08), (0.6, 0.16), (0.3, 0.3)]][level]
+            for (off, a) in trail + [(0.0, 1.0)] {             // 先画残影，再画叶片
                 ctx.saveGState()
                 ctx.translateBy(x: 10, y: 10)
-                ctx.rotate(by: CGFloat(-t / 4 + Double(k) * .pi / 2 + off))   // 4 重对称：一圈动画转 1/4 圈
+                ctx.rotate(by: CGFloat(-t / 2 * [1, 1.5, 2][level] + Double(k) * .pi / 2 + off))   // 4 重对称：24 帧转 1/2、3/4、1 圈
                 let b = NSBezierPath()
                 b.move(to: pt(-0.8, 1.6))
                 b.curve(to: pt(-0.2, 7.6), controlPoint1: pt(-2.6, 4.2), controlPoint2: pt(-2.4, 7.0))
@@ -482,12 +489,13 @@ extension Runner {
         punch { NSBezierPath(ovalIn: NSRect(x: 9.1, y: 9.1, width: 1.8, height: 1.8)).fill() }
     }
 
-    // 心电图：波形向左滚动，左侧渐隐，右端一个亮点；占用率越高档位越高，窗口里的心跳越密（1 / 2 / 3 拍）、滚得越快（每帧 ×1 / ×2 / ×3），每拍高低不一，档位越高峰越高
+    // 心电图：波形向左滚动，左侧渐隐，右端一个亮点；占用率越高档位越高，窗口里的心跳越密（1 / 2 / 3 拍）、滚得越快（每帧 ×1 / ×1.5 / ×2），每拍高低不一，档位越高峰越高
     static let pulse = Runner(id: "pulse", name: "心电图|Heartbeat", frameCount: 45, size: NSSize(width: 30, height: 18), levels: 3) { t, level in
         let ctx = NSGraphicsContext.current!.cgContext
-        // 一圈帧滚过 90×(level+1) 个单位 = 3×(level+1)² 拍，循环无缝；拍子变密时波形横向压缩
-        let period = 30.0 / Double(level + 1), sx = [1, 0.6, 0.42][level], off = t / (2 * .pi) * 90 * Double(level + 1), base = 5.0
-        let beats = 3 * (level + 1) * (level + 1)
+        // 一圈帧滚过 90×m 个单位（m = 1 / 1.5 / 2）= 3 / 9 / 18 拍，循环无缝；拍子变密时波形横向压缩
+        let m = [1, 1.5, 2][level]
+        let period = 30.0 / Double(level + 1), sx = [1, 0.6, 0.42][level], off = t / (2 * .pi) * 90 * m, base = 5.0
+        let beats = Int(3 * m * Double(level + 1))
         let amps = [1.0, 0.8, 0.92, 0.72, 0.97, 0.84, 0.88, 0.76, 0.94]   // 每拍的幅度
         let scale = [0.7, 0.9, 1.15][level]                                 // 档位整体高度
         let keys: [(Double, Double)] = [(0, 0), (4, 0), (5.5, 1.3), (7, 0), (10, 0), (11, -1.3), (12.6, 9.5), (14.2, -3.2),
@@ -516,12 +524,13 @@ extension Runner {
         NSBezierPath(ovalIn: NSRect(x: 27.1, y: y - 1.4, width: 2.8, height: 2.8)).fill()
     }
 
-    // 音波：五根圆头竖条随节奏跳动
-    static let bars = Runner(id: "bars", name: "音波|Sound Wave", frameCount: 12, size: NSSize(width: 22, height: 18)) { t, _ in
-        let phase = [0, 2.1, 4.0, 1.1, 3.1], k = [1.0, 2, 1, 3, 2]   // 频率取整数倍，循环无缝
+    // 音波：五根圆头竖条随节奏跳动；占用率越高跳得越高、越密
+    static let bars = Runner(id: "bars", name: "音波|Sound Wave", frameCount: 24, size: NSSize(width: 22, height: 18), levels: 3) { t, level in
+        let phase = [0, 2.1, 4.0, 1.1, 3.1], k = [1.0, 2, 1, 3, 2], f = [2.0, 3, 4][level]   // 24 帧：频率 ×2 / ×3 / ×4 取整，每帧 ×1 / ×1.5 / ×2，循环无缝
+        let span = [7.0, 10.5, 14.5][level]                   // 跳动幅度
         for i in 0..<5 {
-            let v = 0.5 + 0.32 * sin(k[i] * t + phase[i]) + 0.18 * sin((k[i] + 1) * t + phase[i] * 1.7)
-            let h = 2.6 + v * 12.4
+            let v = 0.5 + 0.32 * sin(k[i] * f * t + phase[i]) + 0.18 * sin((k[i] + 1) * f * t + phase[i] * 1.7)
+            let h = 2.6 + v * span
             NSBezierPath(roundedRect: NSRect(x: 1.6 + Double(i) * 3.9, y: 9 - h / 2, width: 2.8, height: h), xRadius: 1.4, yRadius: 1.4).fill()
         }
     }
@@ -2729,12 +2738,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// CPU 越高跑得越快：0% → 4 帧/秒，100% → 40 帧/秒（指数变化）
+    /// CPU 越高跑得越快：0% → 4 帧/秒，50% → 16，100% → 25（两段指数变化）
     private func scheduleAnimation() {
-        // 跟随占用率，按“倍数”变化（人眼感知速度看的是快了几倍）：0% → 4，50% → 13，70% → 20，100% → 40 帧/秒
+        // 跟随占用率，按“倍数”变化（人眼感知速度看的是快了几倍）：前半段 4 → 16 涨得快，后半段 16 → 25 放缓，高占用时不至于太晃
         // 动画由图层在渲染服务器里播放，帧率高低几乎不影响 CPU
         let u = min(max(usage, 0), 1)
-        let fps = 4 * pow(10, u)
+        let fps = u <= 0.5 ? 4 * pow(4, u * 2) : 16 * pow(25.0 / 16, u * 2 - 1)
         // 分档 runner：越过档位边界 0.1 才换档，避免占用率在边界附近抖动时反复换帧
         let raw = u * Double(runner.levels)
         if runner.levels > 1, abs(raw - (Double(runLevel) + 0.5)) > 0.6 {

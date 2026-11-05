@@ -25,7 +25,7 @@
 
 ## Features
 
-- **Runners** — a steaming coffee cup, a colour pixel-art Rocket Cat (an orange tabby riding a rocket with a flickering flame), a spinning fan, a scrolling heartbeat line (it races faster, packs in more beats and peaks taller as CPU load rises) and bouncing sound-wave bars — all original designs, drawn in code; the monochrome ones are template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage.
+- **Runners** — a steaming coffee cup, a colour pixel-art Rocket Cat (an orange tabby riding a rocket with a flickering flame), a spinning fan, a scrolling heartbeat line and bouncing sound-wave bars — all original designs, drawn in code; the monochrome ones are template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage, in three clearly different levels: the fan spins faster with a longer trail, the bars jump higher, the steam thickens, the rocket flame grows and the heartbeat packs in more, taller beats.
 - **Menu bar metrics with live mini graphs** — CPU, GPU, memory, battery, network, SoC or battery temperature. Choose *Graph + Number*, *Graph only* or *Number only*.
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
   - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version
