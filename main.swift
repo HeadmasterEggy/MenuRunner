@@ -774,15 +774,19 @@ enum DetailKind { case system, cpu, gpu, memory, temps, storage, battery, networ
 /// 进程 → 所属应用（取最外层 .app；否则用可执行文件名）
 enum AppIdentity {
     private static var cache: [pid_t: (key: String, name: String, path: String?)] = [:]
+    /// 缓存既被后台采集队列用（CPU / GPU 各应用），也被主线程用（nettop / top 输出），所以加锁
+    private static let lock = NSRecursiveLock()
 
     /// 缓存版：同一个进程只查一次路径；不在当前进程列表里的缓存会被清掉
     static func of(_ pid: pid_t) -> (key: String, name: String, path: String?) {
+        lock.lock(); defer { lock.unlock() }
         if let c = cache[pid] { return c }
         let v = lookup(pid); cache[pid] = v; return v
     }
 
     static func prune(_ alive: [pid_t]) {
         let set = Set(alive)
+        lock.lock(); defer { lock.unlock() }
         cache = cache.filter { set.contains($0.key) }
         procCache = procCache.filter { set.contains($0.key) }
     }
@@ -790,6 +794,7 @@ enum AppIdentity {
     /// 单个进程：完整可执行文件名 + 所属应用路径（图标 / 在访达中显示）
     private static var procCache: [pid_t: (name: String, path: String?)] = [:]
     static func process(_ pid: pid_t) -> (name: String, path: String?) {
+        lock.lock(); defer { lock.unlock() }
         if let c = procCache[pid] { return c }
         var buf = [CChar](repeating: 0, count: 4096)
         let len = proc_pidpath(pid, &buf, UInt32(buf.count))
@@ -838,6 +843,10 @@ enum AppIdentity {
     }
 }
 
+/// 所有耗时的系统数据采集（遍历全部进程、IORegistry、温度传感器……）都放在这个串行队列里，
+/// 主线程只负责响应点击和画界面：之前这些都在主线程做，采样那一刻点菜单栏图标会卡住、面板弹不出来
+let sampleQueue = DispatchQueue(label: "menurunner.sample", qos: .userInitiated)
+
 final class DetailProvider {
     var cores: [Double] = []
     var cpuApps: [AppStat] = [], gpuApps: [AppStat] = [], netApps: [AppStat] = []
@@ -861,9 +870,10 @@ final class DetailProvider {
         return map
     }()
 
+    /// 后台采到的新数据发布到主线程后调用（让面板重画）
+    var onUpdate: () -> Void = {}
+
     func reset() { stopNetwork(); sampled = false }
-    func resetAll() { stopNetwork(); prevCores = nil; prevCPU = [:]; prevGPU = [:]; prevIf = [:]; sampled = false
-                   cores = []; cpuApps = []; gpuApps = []; netApps = [] }
 
     private var tCPU: CFTimeInterval = 0, tGPU: CFTimeInterval = 0, tIf: CFTimeInterval = 0
     private func dt(_ t: inout CFTimeInterval) -> Double {
@@ -871,45 +881,100 @@ final class DetailProvider {
         return max(now - t, 0.001)
     }
 
-    /// 面板打开时先记一份基准：之后点进 CPU / GPU / 网络，马上就能算出速度，不用再等一轮
+    /// 面板打开时先记一份基准：之后点进 CPU / GPU / 网络，马上就能算出速度，不用再等一轮。
+    /// 在后台做，不耽误面板弹出
     func prime() {
-        refreshCores(); refreshCPUApps(dt(&tCPU)); refreshGPU(dt(&tGPU)); refreshInterfaces(dt(&tIf))
+        sampleQueue.async { [weak self] in
+            guard let self else { return }
+            let c = self.collectCores(), a = self.collectCPUApps(self.dt(&self.tCPU))
+            let g = self.collectGPU(self.dt(&self.tGPU)), i = self.collectInterfaces(self.dt(&self.tIf))
+            self.publish {
+                if let c { self.cores = c }
+                if let a { self.cpuApps = a }
+                self.applyGPU(g)
+                if let i { self.interfaces = i }
+            }
+        }
     }
 
     func prewarmStorage() { refreshAppSizes() }
 
-    func refresh(_ kind: DetailKind) {
-        switch kind {
-        case .cpu:     refreshCores(); refreshCPUApps(dt(&tCPU))
-        case .gpu:     refreshGPU(dt(&tGPU))
-        case .memory:  memApps = ProcessMemory.top(PanelController.procRows); startMemTop()
-        case .temps:   sensors = TempMonitor.shared.readAll()
-        case .storage: refreshVolumes(); refreshAppSizes()
-        case .network: refreshInterfaces(dt(&tIf)); refreshNetApps()
+    /// 采集放在后台队列；wait = true 时同步等结果（点进详情页要按数据条数排版，以及离屏渲染调试）
+    func refresh(_ kind: DetailKind, wait: Bool = false) {
+        switch kind {                      // 这几样要启动子进程 / 本身已经是异步的，留在主线程
+        case .memory:  startMemTop()
+        case .storage: refreshAppSizes()
+        case .network: refreshNetApps()
         default: break
         }
         sampled = true
+        if wait {
+            var apply: () -> Void = {}
+            sampleQueue.sync { apply = self.collect(kind) }
+            apply()
+        } else {
+            sampleQueue.async { [weak self] in
+                guard let self else { return }
+                self.publish(self.collect(kind))
+            }
+        }
+    }
+
+    private func publish(_ apply: @escaping () -> Void) {
+        DispatchQueue.main.async { [weak self] in apply(); self?.onUpdate() }
+    }
+
+    /// 在 sampleQueue 上运行：采集数据，返回一个在主线程把结果写回的闭包
+    private func collect(_ kind: DetailKind) -> () -> Void {
+        switch kind {
+        case .cpu:
+            let c = collectCores(), a = collectCPUApps(dt(&tCPU))
+            return { [weak self] in if let c { self?.cores = c }; if let a { self?.cpuApps = a } }
+        case .gpu:
+            let g = collectGPU(dt(&tGPU))
+            return { [weak self] in self?.applyGPU(g) }
+        case .memory:
+            let m = ProcessMemory.top(PanelController.procRows)
+            return { [weak self] in self?.memApps = m }
+        case .temps:
+            let t = TempMonitor.shared.readAll()
+            return { [weak self] in self?.sensors = t }
+        case .storage:
+            let v = collectVolumes()
+            return { [weak self] in self?.volumes = v }
+        case .network:
+            let i = collectInterfaces(dt(&tIf))
+            return { [weak self] in if let i { self?.interfaces = i } }
+        default:
+            return {}
+        }
+    }
+
+    private func applyGPU(_ g: (apps: [AppStat]?, stats: [String: Int])) {
+        for (k, v) in g.stats { gpuStats[k] = v }
+        if let a = g.apps { gpuApps = a }
     }
 
     // 每个核心占用
-    private func refreshCores() {
+    private func collectCores() -> [Double]? {
         var n: natural_t = 0, info: processor_info_array_t?, count: mach_msg_type_number_t = 0
-        guard host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &n, &info, &count) == KERN_SUCCESS, let info else { return }
+        guard host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &n, &info, &count) == KERN_SUCCESS, let info else { return nil }
         let arr = Array(UnsafeBufferPointer(start: info, count: Int(count)))
         vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(Int(count) * MemoryLayout<integer_t>.stride))
+        defer { prevCores = arr }
         if let p = prevCores, p.count == arr.count {
-            cores = (0..<Int(n)).map { i in
+            return (0..<Int(n)).map { i in
                 let b = i * Int(CPU_STATE_MAX)
                 func d(_ k: Int32) -> Double { Double(arr[b + Int(k)] &- p[b + Int(k)]) }
                 let busy = d(CPU_STATE_USER) + d(CPU_STATE_SYSTEM) + d(CPU_STATE_NICE), total = busy + d(CPU_STATE_IDLE)
                 return total > 0 ? busy / total : 0
             }
         }
-        prevCores = arr
+        return nil
     }
 
     // 各应用 CPU%（与活动监视器一致：多线程可超过 100%）
-    private func refreshCPUApps(_ dt: Double) {
+    private func collectCPUApps(_ dt: Double) -> [AppStat]? {
         var cur: [pid_t: UInt64] = [:], rate: [pid_t: Double] = [:]
         for pid in AppIdentity.allPids() {
             var u = rusage_info_current()
@@ -919,14 +984,15 @@ final class DetailProvider {
             cur[pid] = t
             if let p = prevCPU[pid], t >= p { rate[pid] = Double(t - p) * timebase / (dt * 1e9) }
         }
-        if !prevCPU.isEmpty { cpuApps = AppIdentity.group(rate, limit: 8) }
-        prevCPU = cur
+        defer { prevCPU = cur }
+        return prevCPU.isEmpty ? nil : AppIdentity.group(rate, limit: 8)
     }
 
     // GPU：整体利用率 + 各应用（显卡驱动 AppUsage 里的累计 GPU 时间）
-    private func refreshGPU(_ dt: Double) {
+    private func collectGPU(_ dt: Double) -> (apps: [AppStat]?, stats: [String: Int]) {
+        var gpuStats: [String: Int] = [:]
         var iter: io_iterator_t = 0
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iter) == KERN_SUCCESS else { return }
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iter) == KERN_SUCCESS else { return (nil, [:]) }
         defer { IOObjectRelease(iter) }
         var cur: [pid_t: UInt64] = [:]
         var accel = IOIteratorNext(iter)
@@ -954,14 +1020,14 @@ final class DetailProvider {
         }
         var rate: [pid_t: Double] = [:]
         for (pid, t) in cur { if let p = prevGPU[pid], t >= p { rate[pid] = Double(t - p) / (dt * 1e9) } }
-        if !prevGPU.isEmpty { gpuApps = AppIdentity.group(rate, limit: 8) }
-        prevGPU = cur
+        defer { prevGPU = cur }
+        return (prevGPU.isEmpty ? nil : AppIdentity.group(rate, limit: 8), gpuStats)
     }
 
     // 网卡：名称、IPv4、实时速度
-    private func refreshInterfaces(_ dt: Double) {
+    private func collectInterfaces(_ dt: Double) -> [NetInterface]? {
         var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0 else { return }
+        guard getifaddrs(&head) == 0 else { return nil }
         defer { freeifaddrs(head) }
         var ips: [String: String] = [:], bytes: [String: (UInt64, UInt64)] = [:]
         var p = head
@@ -978,12 +1044,12 @@ final class DetailProvider {
                 bytes[name] = (UInt64(x.ifi_ibytes), UInt64(x.ifi_obytes))
             }
         }
-        interfaces = ips.keys.sorted().prefix(3).map { n in
+        defer { prevIf = bytes }
+        return ips.keys.sorted().prefix(3).map { n in
             let b = bytes[n] ?? (0, 0), pb = prevIf[n] ?? b
             return NetInterface(bsd: n, name: ifNames[n] ?? n, ipv4: ips[n] ?? "",
                                 up: b.1 >= pb.1 ? Double(b.1 - pb.1) / dt : 0, down: b.0 >= pb.0 ? Double(b.0 - pb.0) / dt : 0)
         }
-        prevIf = bytes
     }
 
     // 各应用网络流量：常驻 nettop（-d 差值模式，每秒输出一组“这一秒的字节数”）
@@ -1126,10 +1192,10 @@ final class DetailProvider {
         }
     }
 
-    private func refreshVolumes() {
+    private func collectVolumes() -> [VolumeInfo] {
         let keys: [URLResourceKey] = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
         let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
-        volumes = urls.compactMap { u in
+        return urls.compactMap { u in
             guard let v = try? u.resourceValues(forKeys: Set(keys)), let total = v.volumeTotalCapacity, total > 0 else { return nil }
             let free = v.volumeAvailableCapacityForImportantUsage.map(Double.init) ?? Double(v.volumeAvailableCapacity ?? 0)
             return VolumeInfo(name: v.volumeName ?? u.lastPathComponent, path: u.path, used: Double(total) - free, total: Double(total))
@@ -1436,11 +1502,15 @@ final class PanelController: NSObject, NSPopoverDelegate {
     init(model: StatsModel) {
         self.model = model
         super.init()
-        popover.behavior = .transient          // 点外面自动关闭
+        // 开关由我们自己管（点图标切换、点别处收起），不用 .transient：
+        // .transient 会在按下图标的那一刻先把面板关掉，松开时按钮再判断一次开关，
+        // 两边抢状态，结果时而关不掉、时而点了没反应
+        popover.behavior = .applicationDefined
         if CommandLine.arguments.contains("--light") { popover.appearance = NSAppearance(named: .aqua) }
         popover.animates = true
         popover.delegate = self
         build()
+        detail.onUpdate = { [weak self] in self?.settle() }   // 后台数据到了：接下来几帧重画卡片
     }
 
     private struct Page { let view: NSView; let size: NSSize; let cards: [CardView] }
@@ -1571,7 +1641,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
     private func showDetail(_ k: DetailKind) {
         detailKind = k
         detail.reset()
-        refreshDetail()
+        refreshDetail(wait: true)          // 页面高度按数据条数排版，第一次要等数据到手
         let W = Self.width
         let dynamic = k == .storage || k == .temps || k == .system || k == .battery || k == .network   // 高度随数据条数变化，不缓存
         let page = (dynamic ? nil : detailPages[key(k)]) ?? {
@@ -1623,8 +1693,8 @@ final class PanelController: NSObject, NSPopoverDelegate {
         detailTimer = t
     }
 
-    private func refreshDetail() {
-        detail.refresh(detailKind)
+    private func refreshDetail(wait: Bool = false) {
+        detail.refresh(detailKind, wait: wait)
         settle()
         switch detailKind {
         case .system:  kvRows = SystemDetail.rows(spec)
@@ -1870,23 +1940,28 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     @objc private func settingsClicked(_ sender: NSButton) { onSettings(sender) }
 
-    var isVisible: Bool { popover.isShown }
+    /// 面板“应该”是打开的：show 时置真、hide / 系统关闭时置假。
+    /// 不用 popover.isShown：关闭动画播放期间它还是 true，这时点图标会被当成“再关一次”，看起来就是点了没反应
+    private(set) var isOpen = false
+    var isVisible: Bool { isOpen }
     var onMainPage: Bool { cards.first === mainPage.cards.first }
 
     /// 主页打开时随采样更新“最忙应用”和内存压力
-    func sampleMain() {
+    func sampleMain(pressure: Int) {
         settle()
-        memoryPressure = SystemInfo.memoryPressure()
+        memoryPressure = pressure
         if isVisible && onMainPage { detail.refresh(.cpu) }
     }
 
     func show(below button: NSStatusBarButton) {
+        if popover.isShown { popover.close() }  // 上一次的关闭动画还没播完：立即收掉，再重新弹出
+        isOpen = true
         model.resetShown()                      // 数字从 0 滚动、条形从空长满
-        detail.prime()
         settle(); settleUntil += 0.6                    // 打开时从 0 长出来，多给一点时间
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        detail.prime()                          // 后台采集，不耽误弹出
         startTimer()
-        // 点其他地方就收起：菜单栏小工具不是激活应用，popover 的 .transient 收不到“失去焦点”，
+        // 点其他地方就收起：菜单栏小工具不是激活应用，收不到“失去焦点”，
         // 所以自己监听别的应用里的鼠标按下（全局监听不会收到本应用面板里的点击）
         if outsideMonitor == nil {
             outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
@@ -1896,11 +1971,18 @@ final class PanelController: NSObject, NSPopoverDelegate {
         onVisibilityChange(true)
     }
 
-    func hide() { popover.performClose(nil) }
+    func hide() {
+        guard isOpen else { return }
+        isOpen = false
+        popover.performClose(nil)
+    }
 
     private var outsideMonitor: Any?
 
+    func popoverWillClose(_ notification: Notification) { isOpen = false }
+
     func popoverDidClose(_ notification: Notification) {
+        guard !isOpen else { return }           // 关闭动画结束前又被打开了：别把新面板的计时器 / 监听清掉
         if let m = outsideMonitor { NSEvent.removeMonitor(m); outsideMonitor = nil }
         timer?.invalidate(); timer = nil
         if cards.first !== mainPage.cards.first { backToMain() }
@@ -2072,6 +2154,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     private var batteryTime: (label: String, value: String)?
     func updateBatteryTime() { batteryTime = SystemInfo.batteryTime() }
+    func setBatteryTime(_ t: (label: String, value: String)?) { batteryTime = t }
 
     private func drawBattery(_ w: CGFloat) {
         let m = model
@@ -2241,20 +2324,50 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - 采样（只在 sampleQueue 上调用）
+/// 一次采样的全部数据：在 sampleQueue 上采集，回主线程再用
+struct Sample {
+    var load = CPULoad(), gpu: Double?, memory = SystemInfo.Memory(), net: (up: Double, down: Double) = (0, 0)
+    var temps = Temps(), battery: (percent: Int, state: String)?, health: BatteryHealth?
+    var storage: (used: Double, total: Double)?, batteryTime: (label: String, value: String)?, pressure = 1
+    var gpuMemory: Double?, netTotals: (up: Double, down: Double) = (0, 0)
+}
+
+final class Sampler {
+    private let cpu = CPUMonitor()
+    private let netMon = NetMonitor()
+    private var lastTemps: Temps?
+    private var lastTempsAt: CFTimeInterval = 0
+
+    func prime() { _ = cpu.load(); _ = netMon.rate() }
+
+    func collect(needTemps: Bool, panelVisible: Bool) -> Sample {
+        var s = Sample()
+        s.load = cpu.load()
+        // 温度每 2 秒最多读一次（读一次 ~30ms，温度也不会变那么快）
+        if lastTemps == nil || (needTemps && CACurrentMediaTime() - lastTempsAt >= 2) {
+            lastTemps = TempMonitor.shared.read(); lastTempsAt = CACurrentMediaTime()
+        }
+        s.temps = lastTemps ?? Temps()
+        s.gpu = GPUMonitor.usage(); s.memory = SystemInfo.memory(); s.net = netMon.rate()
+        s.battery = SystemInfo.battery(); s.health = SystemInfo.batteryHealth(); s.storage = SystemInfo.storage()
+        s.batteryTime = SystemInfo.batteryTime(); s.pressure = SystemInfo.memoryPressure()
+        if panelVisible { s.gpuMemory = GPUMonitor.memoryInUse() }
+        s.netTotals = (netMon.totalUp, netMon.totalDown)
+        return s
+    }
+}
+
 // MARK: - App
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let cpu = CPUMonitor()
-    private let netMon = NetMonitor()
-    private let tempMon = TempMonitor.shared
+    private let sampler = Sampler()
     private let model = StatsModel()
     private lazy var panel = PanelController(model: model)
     private var runner = Runner.all.first { $0.id == UserDefaults.standard.string(forKey: "runner") } ?? Runner.coffee   // 默认咖啡
     private lazy var frames = runner.frames(appearance: statusItem.button?.effectiveAppearance)
     private var appearanceObservation: NSKeyValueObservation?
     private var lastDark: Bool?
-    private var lastTemps: Temps?
-    private var lastTempsAt: CFTimeInterval = 0
     private var frameIndex = 0
     private var animTimer: Timer?
     private var sampleTimer: Timer?
@@ -2306,7 +2419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.startSampling(interval: open ? self.refreshInterval : max(self.refreshInterval, 1.5))
         }
         MachineSpec.loadModelName { [weak self] name in self?.panel.spec.model = name }
-        _ = cpu.load(); _ = netMon.rate()
+        sampleQueue.async { [sampler] in sampler.prime() }   // 记下基准，下一次采样才能算出速率
         startSampling(interval: 1.5)
         // 首次采样稍等一下：CPU 占用需要一段时间间隔才算得准，否则历史会被 0 填满
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.sample() }
@@ -2519,23 +2632,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: view.bounds.height + 4), in: view)
     }
 
+    private var sampling = false
+
+    /// 采样：读 IOKit / 温度传感器 / 电池等在后台队列做（单次几十毫秒，偶尔上百毫秒），
+    /// 主线程只拿结果更新界面，点菜单栏图标时不会被采样卡住
     private func sample() {
-        let l = cpu.load()
-        usage = l.total
+        guard !sampling else { return }          // 上一次还没采完（系统很忙时）：跳过这一拍，别越积越多
+        sampling = true
         let needTemps = panel.isVisible || barMetric == "temp" || barMetric == "batTemp"
-        // 温度每 2 秒最多读一次（读一次 ~30ms，温度也不会变那么快）
-        if lastTemps == nil || (needTemps && CACurrentMediaTime() - lastTempsAt >= 2) { lastTemps = tempMon.read(); lastTempsAt = CACurrentMediaTime() }
-        let g = GPUMonitor.usage(), m = SystemInfo.memory(), n = netMon.rate(), t = lastTemps ?? Temps()
+        let panelVisible = panel.isVisible
+        let sampler = self.sampler
+        sampleQueue.async { [weak self] in
+            let s = sampler.collect(needTemps: needTemps, panelVisible: panelVisible)
+            DispatchQueue.main.async { self?.sampling = false; self?.apply(s) }
+        }
+    }
+
+    private func apply(_ s: Sample) {
+        let l = s.load, g = s.gpu, m = s.memory, n = s.net, t = s.temps, bat = s.battery
         switch speedSource {           // Runner 跟随哪个指标变快
         case "gpu":    usage = g ?? 0
         case "memory": usage = m.used / m.total
         default:       usage = l.total
         }
-        let bat = SystemInfo.battery()
-        panel.updateBatteryTime()
-        panel.sampleMain()
-        model.update(cpu: l, gpu: g, memory: m, storage: SystemInfo.storage(), battery: bat,
-                     health: SystemInfo.batteryHealth(), temps: t, net: n)
+        panel.setBatteryTime(s.batteryTime)
+        panel.sampleMain(pressure: s.pressure)
+        model.update(cpu: l, gpu: g, memory: m, storage: s.storage, battery: bat,
+                     health: s.health, temps: t, net: n)
         let pct = Draw.pct
         let title: String
         switch barMetric {
@@ -2556,8 +2679,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let bat { tip.append(L("电池 ", "Battery ") + "\(bat.percent)%") }
         statusItem.button?.toolTip = tip.joined(separator: " · ")
         if panel.isVisible {
-            panel.gpuMemory = GPUMonitor.memoryInUse()
-            panel.netTotals = (netMon.totalUp, netMon.totalDown)
+            if let gm = s.gpuMemory { panel.gpuMemory = gm }
+            panel.netTotals = s.netTotals
         }
         updateStatusImage()
         scheduleAnimation()
@@ -2926,7 +3049,7 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--render" {
     panel.memoryPressure = SystemInfo.memoryPressure()
     panel.gpuMemory = GPUMonitor.memoryInUse()
     panel.netTotals = (net.totalUp, net.totalDown)
-    panel.detail.refresh(.cpu); Thread.sleep(forTimeInterval: 0.8); panel.detail.refresh(.cpu)
+    panel.detail.refresh(.cpu, wait: true); Thread.sleep(forTimeInterval: 0.8); panel.detail.refresh(.cpu, wait: true)
     let v = panel.debugMainView, sz = v.frame.size
     let sheet = NSImage(size: NSSize(width: sz.width * 2 + 20, height: sz.height), flipped: false) { _ in
         for (i, name) in [NSAppearance.Name.aqua, .darkAqua].enumerated() {
