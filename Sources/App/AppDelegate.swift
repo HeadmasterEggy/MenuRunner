@@ -549,13 +549,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setRunSpeed(visibility.visible || panel.isVisible ? fps : 0)
     }
 
-    @objc private func checkForUpdates() {
+    @MainActor @objc private func checkForUpdates() {
         if case .available = Updater.shared.phase { Updater.shared.installPending() } else { Updater.shared.checkNow() }
     }
 
-    @objc private func toggleAutoUpdate() { Updater.shared.autoUpdate.toggle() }
+    @MainActor @objc private func toggleAutoUpdate() { Updater.shared.autoUpdate.toggle() }
 
-    private func refreshUpdateItems() {
+    @MainActor private func refreshUpdateItems() {
         let updater = Updater.shared
         switch updater.phase {
         case .available(let v): updateItem.title = L("更新到 \(v)", "Update to \(v)")
