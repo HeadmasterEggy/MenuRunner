@@ -29,6 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var barStyle = UserDefaults.standard.string(forKey: "barStyle") ?? "graph+text"
     private static let langOptions = [("system", "跟随系统 / System"), ("zh", "中文"), ("en", "English")]
     private let settingsMenu = NSMenu()
+    private let visibility = StatusVisibility()
+    private var targetFps: Double = 0
+    private var widthKey = ""
+    private var widthFloor: CGFloat = 0
 
     func applicationDidFinishLaunching(_ n: Notification) {
         guard let button = statusItem.button else { return }
@@ -49,6 +53,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.installRunAnimation()
         }
         installRunAnimation()
+        visibility.onChange = { [weak self] visible in
+            guard let self else { return }
+            self.setRunSpeed(visible ? self.targetFps : 0, force: true)
+            if visible { self.sample() }
+        }
+        visibility.watch(button.window)
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in self?.panel.detail.prewarmStorage() }
         panel.onSettings = { [weak self] _ in self?.showSettings() }
 
@@ -303,12 +313,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "none":    title = ""
         default:        title = " " + pct(l.total)
         }
-        statusItem.button?.title = barStyle == "graph" ? "" : title
+        guard visibility.visible || panel.isVisible else { return }
+        setStatusTitle(barStyle == "graph" ? "" : title)
         var tip = ["CPU " + pct(l.total), L("内存 ", "Memory ") + pct(m.used / m.total)]
         if let g { tip.append("GPU " + pct(g)) }
         if let soc = t.soc { tip.append(L("温度 ", "Temp ") + TempUnit.format(soc, decimals: 0)) }
         if let bat { tip.append(L("电池 ", "Battery ") + "\(bat.percent)%") }
-        statusItem.button?.toolTip = tip.joined(separator: " · ")
+        let tipText = tip.joined(separator: " · ")
+        if statusItem.button?.toolTip != tipText { statusItem.button?.toolTip = tipText }
         if panel.isVisible {
             if let gm = s.gpuMemory { panel.gpuMemory = gm }
             panel.netTotals = s.netTotals
@@ -317,11 +329,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleAnimation()
     }
 
+    private func setStatusTitle(_ title: String) {
+        guard let b = statusItem.button else { return }
+        if b.title != title { b.title = title }
+        let key = runner.id + barMetric + barStyle
+        if key != widthKey {
+            widthKey = key; widthFloor = 0
+            statusItem.length = NSStatusItem.variableLength
+        }
+        let w = ceil(b.fittingSize.width)
+        if w > widthFloor { widthFloor = w; statusItem.length = w }
+    }
+
     private func updateStatusImage() {
         let rf = frames[frameIndex]
         let placeholder = NSImage(size: rf.size)
         guard barStyle != "text", barMetric != "none" else {
-            statusItem.button?.image = placeholder; layoutRunLayer(); return
+            statusItem.button?.image = placeholder; refreshWidth(); layoutRunLayer(); return
         }
         let gw: CGFloat
         switch barMetric {
@@ -337,7 +361,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         img.isTemplate = true
         statusItem.button?.image = img
+        refreshWidth()
         layoutRunLayer()
+    }
+
+    private func refreshWidth() {
+        setStatusTitle(statusItem.button?.title ?? "")
     }
 
     private let runLayer = CALayer()
@@ -387,7 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         anim.repeatCount = .infinity
         runLayer.beginTime = 0; runLayer.timeOffset = 0
         runLayer.add(anim, forKey: "run")
-        if runFps > 0 { setRunSpeed(runFps, force: true) }
+        setRunSpeed(visibility.visible ? targetFps : 0, force: true)
         layoutRunLayer()
     }
 
@@ -495,7 +524,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let interval = 1 / fps
         if CommandLine.arguments.contains("--fps-log") { NSLog("fps debug: usage=%.0f%% fps=%.1f", u * 100, fps) }
         _ = interval
-        setRunSpeed(fps)
+        targetFps = fps
+        setRunSpeed(visibility.visible || panel.isVisible ? fps : 0)
     }
 
     @objc private func toggleLogin(_ sender: NSMenuItem) {
