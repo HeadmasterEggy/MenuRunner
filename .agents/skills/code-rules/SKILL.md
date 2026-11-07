@@ -28,16 +28,18 @@ The command must print nothing.
 
 ## 3. Organize files into folders
 
-- Group files by area, one concern per file. For this app, folders like these fit:
-  - `Sources/App/` for the entry point, app delegate and menu bar wiring
-  - `Sources/Runners/` for the animated menu bar runners, one runner per file
-  - `Sources/Monitors/` for CPU, memory and other system readers
-  - `Sources/Panel/` for the popover panel views
-  - `Sources/Settings/` for preferences and the settings window
-  - `Sources/Support/` for shared helpers and extensions
-- Name each file after the main type it holds, for example `CatRunner.swift`.
-- Keep scripts, assets and docs in their own places (`scripts/` or the repo root for build scripts, `assets/`, `docs/`).
-- When adding or moving Swift files, make sure `build.sh` compiles all of them, for example with `swiftc -O $(find Sources -name '*.swift') -o ...`.
+- Group files by area, one concern per file. The current layout:
+  - `Sources/main.swift` is the entry point
+  - `Sources/App/` for the app delegate, sampling loop and localization
+  - `Sources/Runners/` for the animated menu bar runners, one runner per file, with the shared `Runner.swift`
+  - `Sources/Monitors/` for CPU, GPU, memory, network, battery, temperature and other system readers
+  - `Sources/Panel/` for the popover panel, its cards, drawing helpers and stats model
+  - `Sources/Settings/` for the settings window
+  - `Sources/Debug/` for debug and command line helpers
+- Put a new file in the folder that matches its area, and add a new folder only when a new area appears.
+- Name each file after the main type it holds, for example `RocketCat.swift`.
+- Keep build scripts at the repo root, images in `assets/`, screenshots and docs in `docs/`.
+- `build.sh` compiles `Sources/**/*.swift`, so new Swift files must live under `Sources/`.
 
 ## Before every commit
 
