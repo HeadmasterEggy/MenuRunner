@@ -36,6 +36,7 @@
   - Network upload / download speed
   - **Click any card for details** (with smooth slide / fade transitions) — app disk usage largest-first, per-core CPU and top apps by CPU, GPU utilization and top apps by GPU, memory by app, every temperature sensor and each fan with its RPM range, all volumes, full battery info (capacity, voltage, power, adapter), network interfaces and top apps by traffic, full machine spec
 - **Settings** — refresh rate (0.5 s / 1 s / 2 s), °C / °F, English / Simplified Chinese, launch at login, open Activity Monitor.
+- **Updates** — *Check for Updates* looks at the latest GitHub Release and installs it in place; with *Automatically Update* on (the default) MenuRunner checks every 6 hours and updates itself, then relaunches.
 
 ## Install
 
@@ -55,6 +56,8 @@ Requires macOS 26+ on Apple Silicon and the Xcode Command Line Tools.
 ./build.sh      # compile, ad-hoc sign, install to ~/Applications
 ./make_dmg.sh   # build dist/MenuRunner-<version>.dmg
 ```
+
+To publish an update, bump `CFBundleShortVersionString` in `build.sh`, run `./make_dmg.sh`, and attach `dist/MenuRunner-<version>.dmg` to a GitHub Release tagged `v<version>`. Installed copies pick it up from there.
 
 Regenerate the app icon (`assets/AppIcon.icns`):
 

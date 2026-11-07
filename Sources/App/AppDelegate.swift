@@ -35,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var targetFps: Double = 0
     private var widthKey = ""
     private var widthFloor: CGFloat = 0
+    private let updateItem = NSMenuItem()
+    private let autoUpdateItem = NSMenuItem()
 
     func applicationDidFinishLaunching(_ n: Notification) {
         guard let button = statusItem.button else { return }
@@ -74,6 +76,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startSampling(interval: 1.5)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.sample() }
         scheduleAnimation()
+        Updater.shared.onChange = { [weak self] in self?.refreshUpdateItems() }
+        Updater.shared.start()
+        if CommandLine.arguments.contains("--check-update") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Updater.shared.checkNow() }
+        }
 
         if CommandLine.arguments.contains("--settings-window") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.showSettings() }
@@ -172,6 +179,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let about = NSMenuItem(title: L("关于 MenuRunner", "About MenuRunner"), action: #selector(showAbout), keyEquivalent: "")
         about.target = self; about.image = icon("info.circle")
         settingsMenu.addItem(about)
+        updateItem.action = #selector(checkForUpdates)
+        updateItem.target = self; updateItem.image = icon("arrow.down.circle")
+        settingsMenu.addItem(updateItem)
+        autoUpdateItem.title = L("自动更新", "Automatically Update")
+        autoUpdateItem.action = #selector(toggleAutoUpdate)
+        autoUpdateItem.target = self; autoUpdateItem.image = icon("arrow.triangle.2.circlepath")
+        settingsMenu.addItem(autoUpdateItem)
+        refreshUpdateItems()
 
         settingsMenu.addItem(.separator())
         let quit = NSMenuItem(title: L("退出", "Quit"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -532,6 +547,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = interval
         targetFps = fps
         setRunSpeed(visibility.visible || panel.isVisible ? fps : 0)
+    }
+
+    @objc private func checkForUpdates() {
+        if case .available = Updater.shared.phase { Updater.shared.installPending() } else { Updater.shared.checkNow() }
+    }
+
+    @objc private func toggleAutoUpdate() { Updater.shared.autoUpdate.toggle() }
+
+    private func refreshUpdateItems() {
+        let updater = Updater.shared
+        switch updater.phase {
+        case .available(let v): updateItem.title = L("更新到 \(v)", "Update to \(v)")
+        case .checking: updateItem.title = L("正在检查更新…", "Checking for Updates…")
+        case .downloading(let v): updateItem.title = L("正在下载 \(v)…", "Downloading \(v)…")
+        default: updateItem.title = L("检查更新…", "Check for Updates…")
+        }
+        autoUpdateItem.state = updater.autoUpdate ? .on : .off
     }
 
     @objc private func toggleLogin(_ sender: NSMenuItem) {

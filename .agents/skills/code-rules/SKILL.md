@@ -35,6 +35,7 @@ The command must print nothing.
   - `Sources/Monitors/` for CPU, GPU, memory, network, battery, temperature and other system readers
   - `Sources/Panel/` for the popover panel, its cards, drawing helpers and stats model
   - `Sources/Settings/` for the settings window
+  - `Sources/Update/` for checking GitHub Releases and installing updates
   - `Sources/Debug/` for debug and command line helpers
 - Put a new file in the folder that matches its area, and add a new folder only when a new area appears.
 - Name each file after the main type it holds, for example `RocketCat.swift`.

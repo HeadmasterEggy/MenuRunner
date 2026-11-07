@@ -36,6 +36,7 @@
   - 网络上传 / 下载速度
   - **每张卡片都能点进去看细节**（平滑滑动 / 淡入切换）：各应用占用的磁盘空间（从大到小）、每个 CPU 核心和最占 CPU 的应用、GPU 利用率和最占 GPU 的应用、各应用内存、所有温度传感器和每个风扇的转速范围、所有磁盘、完整电池信息（容量、电压、功率、适配器）、网卡和流量最大的应用、完整本机配置
 - **设置**：刷新频率（0.5 / 1 / 2 秒）、°C / °F、简体中文 / English、开机自动启动、打开活动监视器。
+- **更新**：「检查更新」会查看 GitHub 最新 Release 并就地安装；开启「自动更新」（默认开启）后每 6 小时检查一次，自动更新并重启。
 
 ## 安装
 
@@ -55,6 +56,8 @@
 ./build.sh      # 编译、本地签名、安装到 ~/Applications
 ./make_dmg.sh   # 生成 dist/MenuRunner-<版本>.dmg
 ```
+
+发布更新：在 `build.sh` 里改 `CFBundleShortVersionString`，运行 `./make_dmg.sh`，把 `dist/MenuRunner-<版本>.dmg` 上传到标签为 `v<版本>` 的 GitHub Release，已安装的副本就会从那里拿到更新。
 
 重新生成 app 图标（`assets/AppIcon.icns`）：
 
