@@ -139,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    private func buildSettingsMenu() {
+    @MainActor private func buildSettingsMenu() {
         settingsMenu.removeAllItems()
         let open = NSMenuItem(title: L("设置…", "Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         open.target = self; open.image = icon("gearshape")
