@@ -1,5 +1,4 @@
 #!/bin/zsh
-# 打包 DMG：MenuRunner.app + “应用程序”快捷方式，拖进去即可安装
 set -e
 cd "$(dirname "$0")"
 ./build.sh >/dev/null

@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 APP=MenuRunner.app
 rm -rf $APP
 mkdir -p $APP/Contents/MacOS
-swiftc -O main.swift -o $APP/Contents/MacOS/MenuRunner
+swiftc -O Sources/**/*.swift -o $APP/Contents/MacOS/MenuRunner
 cat > $APP/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -20,11 +20,10 @@ cat > $APP/Contents/Info.plist <<PLIST
 </dict></plist>
 PLIST
 mkdir -p $APP/Contents/Resources
-cp assets/AppIcon.icns $APP/Contents/Resources/AppIcon.icns   # 由 MenuRunner --icon 生成，见 README
+cp assets/AppIcon.icns $APP/Contents/Resources/AppIcon.icns
 codesign --force -s - $APP
 echo "Built $PWD/$APP"
 
-# 安装到 ~/Applications（登录项指向这里）
 pkill -x MenuRunner || true
 mkdir -p ~/Applications
 rm -rf ~/Applications/MenuRunner.app
