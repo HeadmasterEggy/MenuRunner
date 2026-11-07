@@ -45,6 +45,7 @@ struct RunnerCard: View {
 
 struct SettingsView: View {
     @ObservedObject var m: SettingsModel
+    @ObservedObject var updater = Updater.shared
     var width: CGFloat = 540
     var height: CGFloat = 770
 
@@ -60,6 +61,11 @@ struct SettingsView: View {
             ForEach(m.options(key), id: \.id) { o in Text(o.name).tag(o.id) }
         } label: { Label(title, systemImage: icon) }
         .pickerStyle(.segmented)
+    }
+
+    private var updateButtonTitle: String {
+        if case .available(let v) = updater.phase { return L("更新到 \(v)", "Update to \(v)") }
+        return L("立即检查", "Check Now")
     }
 
     var body: some View {
@@ -95,6 +101,25 @@ struct SettingsView: View {
                 LabeledContent {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "--").foregroundStyle(.secondary)
                 } label: { Label(L("版本", "Version"), systemImage: "info.circle") }
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        if updater.busy { ProgressView().controlSize(.small) }
+                        Button(updateButtonTitle) {
+                            if case .available = updater.phase { updater.installPending() } else { updater.checkNow() }
+                        }
+                        .disabled(updater.busy)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(L("检查更新", "Check for Updates"), systemImage: "arrow.down.circle")
+                        if !updater.statusText.isEmpty {
+                            Text(updater.statusText).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+                Toggle(isOn: $updater.autoUpdate) {
+                    Label(L("自动更新", "Automatically Update"), systemImage: "arrow.triangle.2.circlepath")
+                }
                 LabeledContent {
                     Link("HeadmasterEggy/MenuRunner", destination: URL(string: "https://github.com/HeadmasterEggy/MenuRunner")!)
                 } label: { Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right") }
