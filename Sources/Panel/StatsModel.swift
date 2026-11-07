@@ -10,7 +10,8 @@ final class StatsModel {
     var battery: (percent: Int, state: String)?, health: BatteryHealth?
     var temps = Temps(), net: (up: Double, down: Double) = (0, 0)
     var cpuHistory: [CPULoad] = [], gpuHistory: [Double] = [], netHistory: [(up: Double, down: Double)] = []
-    var memHistory: [Double] = []
+    var memHistory: [Double] = [], fanHistory: [Double] = []
+    var fans: [Fan] = []
     var lastSample = CACurrentMediaTime()
 
     private var target: [String: Double] = [:]
@@ -28,17 +29,19 @@ final class StatsModel {
     var scroll: Double { min((CACurrentMediaTime() - lastSample) / Self.interval, 1) }
 
     func update(cpu: CPULoad, gpu: Double?, memory: SystemInfo.Memory, storage: (used: Double, total: Double)?,
-                battery: (percent: Int, state: String)?, health: BatteryHealth?, temps: Temps, net: (up: Double, down: Double)) {
+                battery: (percent: Int, state: String)?, health: BatteryHealth?, temps: Temps, net: (up: Double, down: Double), fans: [Fan] = []) {
         self.cpu = cpu; self.gpu = gpu; self.memory = memory; self.storage = storage
-        self.battery = battery; self.health = health; self.temps = temps; self.net = net
+        self.battery = battery; self.health = health; self.temps = temps; self.net = net; self.fans = fans
         func push<T>(_ a: inout [T], _ x: T) { a.append(x); if a.count > Self.historyLength { a.removeFirst() } }
         if cpuHistory.isEmpty {
             cpuHistory = Array(repeating: cpu, count: Self.historyLength)
             gpuHistory = Array(repeating: gpu ?? 0, count: Self.historyLength)
             netHistory = Array(repeating: net, count: Self.historyLength)
             memHistory = Array(repeating: memory.used / memory.total, count: Self.historyLength)
+            fanHistory = Array(repeating: FanMonitor.peakFraction(fans), count: Self.historyLength)
         }
         push(&memHistory, memory.used / memory.total)
+        push(&fanHistory, FanMonitor.peakFraction(fans))
         push(&cpuHistory, cpu); push(&gpuHistory, gpu ?? 0); push(&netHistory, net)
         lastSample = CACurrentMediaTime()
 
@@ -53,5 +56,7 @@ final class StatsModel {
         if let t = temps.battery { set("tBat", t) }
         if let t = temps.ssd { set("tSsd", t) }
         set("up", net.up); set("down", net.down)
+        if let rpm = FanMonitor.average(fans) { set("fan", rpm); set("fanFrac", FanMonitor.peakFraction(fans)) }
+        for f in fans { set("fan\(f.index)", f.rpm) }
     }
 }

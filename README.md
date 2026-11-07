@@ -26,15 +26,15 @@
 ## Features
 
 - **Runners** — a steaming coffee cup, a colour pixel-art Rocket Cat (an orange tabby riding a rocket with a flickering flame), a spinning fan, a scrolling heartbeat line, bouncing sound-wave bars, an hourglass that flips when the sand runs out, a colour lava lamp, a turning DNA double helix, a sweeping radar, a squash-and-stretch bouncing ball and a clock with spinning hands — all original designs, drawn in code; the monochrome ones are template images that adapt to light / dark menu bars. Their speed follows CPU, GPU or memory usage, in three clearly different levels: the fan spins faster with a longer trail, the bars jump higher, the steam thickens, the rocket flame grows, the heartbeat packs in more, taller beats, the sand pours faster, the lava blobs multiply, the helix gains rungs, the radar trail lengthens with more blips, the ball bounces higher and the clock hands blur.
-- **Menu bar metrics with live mini graphs** — CPU, GPU, memory, battery, network, SoC or battery temperature. Choose *Graph + Number*, *Graph only* or *Number only*.
+- **Menu bar metrics with live mini graphs** — CPU, GPU, memory, battery, network, SoC or battery temperature, fan speed (on Macs with fans). Choose *Graph + Number*, *Graph only* or *Number only*.
 - **Liquid Glass panel** (`NSPopover` + `NSGlassEffectView`), animated at 60 fps:
   - Machine spec — model, chip, CPU / GPU cores, memory, disk, macOS version
   - CPU (System / User / Idle) and GPU history charts
   - Memory breakdown (App / Wired / Compressed)
   - Storage ring, battery level, health, cycle count and estimated time left (or time until full)
-  - Temperatures — SoC, battery, SSD
+  - Temperatures — SoC, battery, SSD, plus fan speed on Macs with fans
   - Network upload / download speed
-  - **Click any card for details** (with smooth slide / fade transitions) — app disk usage largest-first, per-core CPU and top apps by CPU, GPU utilization and top apps by GPU, memory by app, every temperature sensor, all volumes, full battery info (capacity, voltage, power, adapter), network interfaces and top apps by traffic, full machine spec
+  - **Click any card for details** (with smooth slide / fade transitions) — app disk usage largest-first, per-core CPU and top apps by CPU, GPU utilization and top apps by GPU, memory by app, every temperature sensor and each fan with its RPM range, all volumes, full battery info (capacity, voltage, power, adapter), network interfaces and top apps by traffic, full machine spec
 - **Settings** — refresh rate (0.5 s / 1 s / 2 s), °C / °F, English / Simplified Chinese, launch at login, open Activity Monitor.
 
 ## Install
@@ -74,4 +74,5 @@ MenuRunner.app/Contents/MacOS/MenuRunner --preview out.png  # export runner fram
 ## Notes
 
 - SoC / SSD temperatures come from the system HID temperature sensors through a private IOKit API (the same approach Stats and iStat use). No root needed, but future macOS versions may change it; the panel shows `--` when unavailable.
+- Fan speed is read from the SMC (`AppleSMC`), also without root. Macs without fans, like the MacBook Air, simply don't show the fan row or menu bar option.
 - Everything else uses public APIs: `host_statistics`, IORegistry, `getifaddrs` and IOKit power sources.

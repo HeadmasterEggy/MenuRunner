@@ -21,7 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var barOptions: [(String, String)] {
         [("cpu", "CPU"), ("gpu", "GPU"), ("memory", L("内存", "Memory")), ("battery", L("电池", "Battery")),
          ("network", L("网络", "Network")), ("temp", L("芯片温度", "SoC Temperature")),
-         ("batTemp", L("电池温度", "Battery Temperature")), ("none", L("不显示", "None"))]
+         ("batTemp", L("电池温度", "Battery Temperature"))]
+            + (FanMonitor.shared.hasFans ? [("fan", L("风扇转速", "Fan Speed"))] : [])
+            + [("none", L("不显示", "None"))]
     }
     private static var styleOptions: [(String, String)] {
         [("graph+text", L("图表 + 数字", "Graph + Number")), ("graph", L("仅图表", "Graph Only")), ("text", L("仅数字", "Number Only"))]
@@ -282,10 +284,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !sampling else { return }
         sampling = true
         let needTemps = panel.isVisible || barMetric == "temp" || barMetric == "batTemp"
+        let needFans = FanMonitor.shared.hasFans && (panel.isVisible || barMetric == "fan")
         let panelVisible = panel.isVisible
         let sampler = self.sampler
         sampleQueue.async { [weak self] in
-            let s = sampler.collect(needTemps: needTemps, panelVisible: panelVisible)
+            let s = sampler.collect(needTemps: needTemps, needFans: needFans, panelVisible: panelVisible)
             DispatchQueue.main.async { self?.sampling = false; self?.apply(s) }
         }
     }
@@ -300,7 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setBatteryTime(s.batteryTime)
         panel.sampleMain(pressure: s.pressure)
         model.update(cpu: l, gpu: g, memory: m, storage: s.storage, battery: bat,
-                     health: s.health, temps: t, net: n)
+                     health: s.health, temps: t, net: n, fans: s.fans)
         let pct = Draw.pct
         let title: String
         switch barMetric {
@@ -310,6 +313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "network": title = " ↓\(NetMonitor.format(n.down, compact: true)) ↑\(NetMonitor.format(n.up, compact: true))"
         case "temp":    title = t.soc.map { " " + TempUnit.format($0, decimals: 0, unit: false) } ?? " --"
         case "batTemp": title = t.battery.map { " " + TempUnit.format($0, decimals: 1, unit: false) } ?? " --"
+        case "fan":     title = FanMonitor.average(s.fans).map { " " + FanMonitor.format($0, unit: false) } ?? " --"
         case "none":    title = ""
         default:        title = " " + pct(l.total)
         }
@@ -319,6 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let g { tip.append("GPU " + pct(g)) }
         if let soc = t.soc { tip.append(L("温度 ", "Temp ") + TempUnit.format(soc, decimals: 0)) }
         if let bat { tip.append(L("电池 ", "Battery ") + "\(bat.percent)%") }
+        if let rpm = FanMonitor.average(s.fans) { tip.append(L("风扇 ", "Fan ") + FanMonitor.format(rpm)) }
         let tipText = tip.joined(separator: " · ")
         if statusItem.button?.toolTip != tipText { statusItem.button?.toolTip = tipText }
         if panel.isVisible {
@@ -486,6 +491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch barMetric {
         case "gpu":    spark(m.gpuHistory)
         case "memory": spark(m.memHistory)
+        case "fan":    spark(m.fanHistory)
         case "network":
             let peak = max(m.netHistory.suffix(24).map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024)
             spark(m.netHistory.map { $0.down / peak }, line: m.netHistory.map { $0.up / peak })
