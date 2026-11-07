@@ -17,6 +17,8 @@ enum DebugCommand {
         print("temps soc", t.soc.map { String(format: "%.1f", $0) } ?? "nil", "battery", t.battery.map { String(format: "%.1f", $0) } ?? "nil",
               "ssd", t.ssd.map { String(format: "%.1f", $0) } ?? "nil")
         print("network up", NetMonitor.format(nr.up), "down", NetMonitor.format(nr.down))
+        print("smc", SMC.shared.available ? "open" : "unavailable", "fans", FanMonitor.shared.count)
+        for f in FanMonitor.shared.read() { print("  \(f.name)", FanMonitor.format(f.rpm), "min", FanMonitor.format(f.minRpm), "max", FanMonitor.format(f.maxRpm)) }
         for a in ProcessMemory.top(10) { print("  mem", ProcessMemory.format(a.bytes), "×\(a.processes)", a.name) }
         exit(0)
     }
@@ -58,6 +60,7 @@ enum DebugCommand {
         bench("batteryTime") { _ = SystemInfo.batteryTime() }
         bench("temps") { _ = tm.read() }
         bench("network") { _ = n.rate() }
+        bench("fans") { _ = FanMonitor.shared.read() }
         bench("pressure") { _ = SystemInfo.memoryPressure() }
         let frames = Runner.coffee.frames()
         bench("coffee frames") { _ = Runner.coffee.frames() }
@@ -142,7 +145,7 @@ enum DebugCommand {
         _ = cpu.load(); _ = net.rate(); Thread.sleep(forTimeInterval: 0.6)
         for _ in 0..<3 {
             model.update(cpu: cpu.load(), gpu: GPUMonitor.usage(), memory: SystemInfo.memory(), storage: SystemInfo.storage(),
-                         battery: SystemInfo.battery(), health: SystemInfo.batteryHealth(), temps: TempMonitor.shared.read(), net: net.rate())
+                         battery: SystemInfo.battery(), health: SystemInfo.batteryHealth(), temps: TempMonitor.shared.read(), net: net.rate(), fans: FanMonitor.shared.read())
             Thread.sleep(forTimeInterval: 0.3)
         }
         model.tick(dt: 10)

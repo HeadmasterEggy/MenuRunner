@@ -12,6 +12,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
     var onVisibilityChange: (Bool) -> Void = { _ in }
 
     static let width: CGFloat = 340, gap: CGFloat = 10, margin: CGFloat = 10
+    private static let fanRowHeight: CGFloat = 25
+    private let showsFans = FanMonitor.shared.hasFans
+    private var gpuTempsHeight: CGFloat { 118 + (showsFans ? Self.fanRowHeight : 0) }
 
     init(model: StatsModel) {
         self.model = model
@@ -69,7 +72,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         mainPage = makePage([
             (56,  [(0, W, drawHeader, { [weak self] in self?.showDetail(.system) })]),
             (134, [(0, W, drawCPU, { [weak self] in self?.showDetail(.cpu) })]),
-            (118, [(0, half, drawGPU, { [weak self] in self?.showDetail(.gpu) }), (half + g, half, drawTemps, { [weak self] in self?.showDetail(.temps) })]),
+            (gpuTempsHeight, [(0, half, drawGPU, { [weak self] in self?.showDetail(.gpu) }), (half + g, half, drawTemps, { [weak self] in self?.showDetail(.temps) })]),
             (84,  [(0, W, drawMemory, { [weak self] in self?.showDetail(.memory) })]),
             (138, [(0, half, drawStorage, { [weak self] in self?.showDetail(.storage) }), (half + g, half, drawBattery, { [weak self] in self?.showDetail(.battery) })]),
             (96,  [(0, W, drawNetwork, { [weak self] in self?.showDetail(.network) })]),
@@ -160,7 +163,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
             case .gpu:     rows += [(4 * 24 + 46, [(0, W, drawGPUStats, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("占用 GPU 最多的应用", "Top apps by GPU"), self?.detail.gpuApps ?? [], { String(format: "%.1f%%", $0 * 100) }) }, nil)])]
             case .memory:  rows += [(CGFloat(Self.procRows) * 30 + 46, [(0, W, drawProcessList, nil)]),
                                     (CGFloat(Self.topProcRows) * 30 + 46, [(0, W, drawTopProcs, nil)])]
-            case .temps:   rows.append((CGFloat(max(1, min(14, (detail.sensors.count + 1) / 2))) * 22 + 24, [(0, W, drawSensors, nil)]))
+            case .temps:
+                if showsFans { rows.append((CGFloat(FanMonitor.shared.count) * 38 + 42, [(0, W, drawFans, nil)])) }
+                rows.append((CGFloat(max(1, min(14, (detail.sensors.count + 1) / 2))) * 22 + 24, [(0, W, drawSensors, nil)]))
             case .storage: rows += [(CGFloat(max(1, detail.volumes.count)) * 46 + 14, [(0, W, drawVolumes, nil)]),
                                     (12 * 30 + 46, [(0, W, drawAppSizes, nil)])]
             case .network: rows += [(CGFloat(max(1, detail.interfaces.count)) * 40 + 40, [(0, W, drawInterfaces, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("网络流量最大的应用", "Top apps by network"), self?.detail.netApps ?? [], { NetMonitor.format($0) }) }, nil)])]
@@ -552,7 +557,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         if let mem = gpuMemory {
             Draw.text(L("显存 ", "GPU mem ") + SystemInfo.gb(mem), NSPoint(x: 14, y: 28), size: 10, color: .glassSecondary)
         }
-        let chart = NSRect(x: 14, y: 44, width: w - 28, height: 60)
+        let chart = NSRect(x: 14, y: 44, width: w - 28, height: gpuTempsHeight - 58)
         Draw.chartBackground(chart)
         Draw.area(chart, m.gpuHistory, scroll: m.scroll, color: .systemGreen, dot: true)
     }
@@ -581,6 +586,25 @@ final class PanelController: NSObject, NSPopoverDelegate {
             Draw.text(has ? TempUnit.format(c) : "--", NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true, mono: true)
             Draw.bar(NSRect(x: 14, y: y + 17, width: w - 28, height: 4), has ? (c - 20) / 80 : 0, Draw.tempColor(c))
             y += 25
+        }
+        guard showsFans else { return }
+        let hasRpm = !m.fans.isEmpty
+        Draw.text(L("风扇", "Fan"), NSPoint(x: 14, y: y), size: 11, color: .glassSecondary)
+        Draw.text(hasRpm ? FanMonitor.format(m.v("fan")) : "--", NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true, mono: true)
+        Draw.bar(NSRect(x: 14, y: y + 17, width: w - 28, height: 4), hasRpm ? m.v("fanFrac") : 0, .systemCyan)
+    }
+
+    private func drawFans(_ w: CGFloat) {
+        sectionTitle(L("风扇转速", "Fan speed"))
+        let fans = model.fans
+        guard !fans.isEmpty else { Draw.text(L("读取不到风扇转速", "Fan speed unavailable"), NSPoint(x: 14, y: 40), size: 11, color: .glassTertiary); return }
+        var y: CGFloat = 36
+        for f in fans {
+            Draw.text(f.name, NSPoint(x: 14, y: y), size: 12, weight: .medium)
+            Draw.text(FanMonitor.format(model.v("fan\(f.index)")), NSPoint(x: w - 14, y: y), size: 12, weight: .medium, right: true, mono: true)
+            Draw.bar(NSRect(x: 14, y: y + 18, width: w - 28, height: 4), f.fraction, .systemCyan)
+            Draw.text(FanMonitor.format(f.minRpm, unit: false) + " – " + FanMonitor.format(f.maxRpm), NSPoint(x: 14, y: y + 25), size: 9, color: .glassTertiary, mono: true)
+            y += 38
         }
     }
 
