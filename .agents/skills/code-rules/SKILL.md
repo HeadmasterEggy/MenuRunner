@@ -1,6 +1,6 @@
 ---
 name: code-rules
-description: MenuRunner code rules. Use before writing, editing, splitting or reviewing any source file in this repo, and before every commit.
+description: MenuRunner code and branch rules. Use before writing, editing, splitting or reviewing any source file in this repo, before creating a branch, and before every commit.
 ---
 
 # MenuRunner code rules
@@ -41,9 +41,22 @@ The command must print nothing.
 - Keep build scripts at the repo root, images in `assets/`, screenshots and docs in `docs/`.
 - `build.sh` compiles `Sources/**/*.swift`, so new Swift files must live under `Sources/`.
 
+## 4. Branch names
+
+- Format: `<type>/<short-description>`, all lowercase, words joined with hyphens, at most about five words.
+- Types:
+  - `feat/` for a new feature, for example `feat/lava-lamp-runner`
+  - `fix/` for a bug fix, for example `fix/cpu-spike-on-wake`
+  - `refactor/` for restructuring without behavior change, for example `refactor/split-panel-controller`
+  - `docs/` for README, screenshots and other docs, for example `docs/update-zh-readme`
+  - `chore/` for build scripts, config, skills and tooling, for example `chore/branch-naming-rule`
+- Describe the change, not the person or the date. No issue numbers alone, no `wip`, `test` or `tmp` branches.
+- One branch per change. Start it from the latest `main`.
+
 ## Before every commit
 
 1. No new comments in the diff: `git diff --cached | grep -nE '^\+.*(//|/\*)'` should only show URLs or string contents.
 2. The line-count check above prints nothing.
 3. New files sit in the folder that matches their area.
 4. `./build.sh` still builds.
+5. The branch name follows the format above.
