@@ -139,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
-    @MainActor private func buildSettingsMenu() {
+    private func buildSettingsMenu() {
         settingsMenu.removeAllItems()
         let open = NSMenuItem(title: L("设置…", "Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         open.target = self; open.image = icon("gearshape")
@@ -549,13 +549,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setRunSpeed(visibility.visible || panel.isVisible ? fps : 0)
     }
 
-    @MainActor @objc private func checkForUpdates() {
+    @objc private func checkForUpdates() {
         if case .available = Updater.shared.phase { Updater.shared.installPending() } else { Updater.shared.checkNow() }
     }
 
-    @MainActor @objc private func toggleAutoUpdate() { Updater.shared.autoUpdate.toggle() }
+    @objc private func toggleAutoUpdate() { Updater.shared.autoUpdate.toggle() }
 
-    @MainActor private func refreshUpdateItems() {
+    private func refreshUpdateItems() {
         let updater = Updater.shared
         switch updater.phase {
         case .available(let v): updateItem.title = L("更新到 \(v)", "Update to \(v)")

@@ -1,6 +1,5 @@
 import AppKit
 
-@MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()
 
@@ -58,7 +57,7 @@ final class Updater: ObservableObject {
         timer?.invalidate()
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.firstCheckDelay) { [weak self] in self?.scheduledCheck() }
         let t = Timer(timeInterval: Self.checkInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.scheduledCheck() }
+            self?.scheduledCheck()
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
@@ -73,28 +72,36 @@ final class Updater: ObservableObject {
 
     private func check(interactive: Bool) {
         guard !busy else { return }
-        phase = .checking
-        onChange()
+        set(.checking)
         Task {
             do {
                 let release = try await ReleaseFeed.fetchLatest()
-                UserDefaults.standard.set(Date(), forKey: Self.lastCheckKey)
-                guard ReleaseFeed.isNewer(release.version, than: ReleaseFeed.currentVersion) else {
-                    phase = .upToDate
-                    onChange()
-                    if interactive { alertUpToDate() }
-                    return
-                }
-                pending = release
-                phase = .available(release.version)
-                onChange()
-                if interactive { offer(release) } else if autoUpdate { install(release, interactive: false) }
+                await MainActor.run { self.handle(release, interactive: interactive) }
             } catch {
-                phase = .failed(L("检查更新失败：", "Update check failed: ") + error.localizedDescription)
-                onChange()
-                if interactive { alertFailure(L("无法检查更新", "Couldn't check for updates")) }
+                let message = L("检查更新失败：", "Update check failed: ") + error.localizedDescription
+                await MainActor.run {
+                    self.set(.failed(message))
+                    if interactive { self.alertFailure(L("无法检查更新", "Couldn't check for updates")) }
+                }
             }
         }
+    }
+
+    @MainActor private func handle(_ release: Release, interactive: Bool) {
+        UserDefaults.standard.set(Date(), forKey: Self.lastCheckKey)
+        guard ReleaseFeed.isNewer(release.version, than: ReleaseFeed.currentVersion) else {
+            set(.upToDate)
+            if interactive { alertUpToDate() }
+            return
+        }
+        pending = release
+        set(.available(release.version))
+        if interactive { offer(release) } else if autoUpdate { install(release, interactive: false) }
+    }
+
+    private func set(_ next: Phase) {
+        phase = next
+        onChange()
     }
 
     func installPending() {
@@ -103,21 +110,25 @@ final class Updater: ObservableObject {
     }
 
     private func install(_ release: Release, interactive: Bool) {
-        phase = .downloading(release.version)
-        onChange()
-        Task {
+        set(.downloading(release.version))
+        Task.detached {
             do {
-                let app = try await Task.detached { try await UpdateInstaller.prepare(release) }.value
-                try UpdateInstaller.installAndRelaunch(app)
+                let app = try await UpdateInstaller.prepare(release)
+                await MainActor.run {
+                    do { try UpdateInstaller.installAndRelaunch(app) } catch { self.installFailed(error, interactive: interactive) }
+                }
             } catch {
-                phase = .failed(L("更新失败：", "Update failed: ") + error.localizedDescription)
-                onChange()
-                if interactive { alertFailure(L("更新失败", "Update failed")) }
+                await MainActor.run { self.installFailed(error, interactive: interactive) }
             }
         }
     }
 
-    private func offer(_ release: Release) {
+    @MainActor private func installFailed(_ error: Error, interactive: Bool) {
+        set(.failed(L("更新失败：", "Update failed: ") + error.localizedDescription))
+        if interactive { alertFailure(L("更新失败", "Update failed")) }
+    }
+
+    @MainActor private func offer(_ release: Release) {
         let alert = NSAlert()
         alert.messageText = L("MenuRunner \(release.version) 可以更新了", "MenuRunner \(release.version) is available")
         let notes = release.notes.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -134,7 +145,7 @@ final class Updater: ObservableObject {
         }
     }
 
-    private func alertUpToDate() {
+    @MainActor private func alertUpToDate() {
         let alert = NSAlert()
         alert.messageText = L("已是最新版本", "You're up to date")
         alert.informativeText = L("MenuRunner \(ReleaseFeed.currentVersion) 是最新版本。", "MenuRunner \(ReleaseFeed.currentVersion) is the latest version.")
@@ -142,7 +153,7 @@ final class Updater: ObservableObject {
         alert.runModal()
     }
 
-    private func alertFailure(_ title: String) {
+    @MainActor private func alertFailure(_ title: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = title
