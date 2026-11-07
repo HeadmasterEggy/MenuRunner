@@ -2543,7 +2543,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch key {
         case "runner":
             guard let r = Runner.all.first(where: { $0.id == id }) else { return }
-            runner = r; runLevel = 0; frames = r.frames(appearance: statusItem.button?.effectiveAppearance); frameIndex = 0
+            // 档位按当前占用率直接算好，不然高负载时切换后要等下一次采样才换到对应档位
+            runner = r; runLevel = min(Int(min(max(usage, 0), 1) * Double(r.levels)), r.levels - 1)
+            frames = r.frames(appearance: statusItem.button?.effectiveAppearance, level: runLevel); frameIndex = 0
             UserDefaults.standard.set(id, forKey: "runner")
             updateStatusImage()
             installRunAnimation()
