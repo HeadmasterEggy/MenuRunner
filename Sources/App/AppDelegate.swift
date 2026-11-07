@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let map: [String: DetailKind] = ["system": .system, "cpu": .cpu, "gpu": .gpu, "memory": .memory, "temps": .temps,
                                                      "storage": .storage, "battery": .battery, "network": .network]
                     if let k = map[CommandLine.arguments[i + 1]] { self.panel.debugShow(k) }
+                    if CommandLine.arguments[i + 1] == "settings" { self.showSettings() }
                 }
             }
         }

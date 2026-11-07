@@ -46,7 +46,7 @@ struct Runner {
         }
     }
 
-    static let all: [Runner] = [coffee, rocketCat, fan, pulse, bars]
+    static let all: [Runner] = [coffee, rocketCat, fan, pulse, bars, hourglass, lavaLamp, dna, radar, ball, clock]
 
 }
 
