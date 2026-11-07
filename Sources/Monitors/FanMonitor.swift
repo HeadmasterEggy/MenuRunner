@@ -40,6 +40,10 @@ final class FanMonitor {
         fans.map(\.fraction).max() ?? 0
     }
 
+    static func label(_ rpm: Double, stopped: Bool) -> String {
+        stopped ? L("停转", "Stopped") : format(rpm)
+    }
+
     static func format(_ rpm: Double, unit: Bool = true) -> String {
         String(format: "%.0f", rpm) + (unit ? " RPM" : "")
     }

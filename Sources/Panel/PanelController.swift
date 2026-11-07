@@ -590,7 +590,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         guard showsFans else { return }
         let hasRpm = !m.fans.isEmpty
         Draw.text(L("风扇", "Fan"), NSPoint(x: 14, y: y), size: 11, color: .glassSecondary)
-        Draw.text(hasRpm ? FanMonitor.format(m.v("fan")) : "--", NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true, mono: true)
+        Draw.text(hasRpm ? FanMonitor.label(m.v("fan"), stopped: m.fans.allSatisfy { $0.rpm < 1 }) : "--", NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true, mono: true)
         Draw.bar(NSRect(x: 14, y: y + 17, width: w - 28, height: 4), hasRpm ? m.v("fanFrac") : 0, .systemCyan)
     }
 
@@ -601,7 +601,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         var y: CGFloat = 36
         for f in fans {
             Draw.text(f.name, NSPoint(x: 14, y: y), size: 12, weight: .medium)
-            Draw.text(FanMonitor.format(model.v("fan\(f.index)")), NSPoint(x: w - 14, y: y), size: 12, weight: .medium, right: true, mono: true)
+            Draw.text(FanMonitor.label(model.v("fan\(f.index)"), stopped: f.rpm < 1), NSPoint(x: w - 14, y: y), size: 12, weight: .medium, right: true, mono: true)
             Draw.bar(NSRect(x: 14, y: y + 18, width: w - 28, height: 4), f.fraction, .systemCyan)
             Draw.text(FanMonitor.format(f.minRpm, unit: false) + " – " + FanMonitor.format(f.maxRpm), NSPoint(x: 14, y: y + 25), size: 9, color: .glassTertiary, mono: true)
             y += 38
