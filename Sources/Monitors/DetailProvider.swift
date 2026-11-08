@@ -291,7 +291,13 @@ final class DetailProvider {
         p.standardInput = FileHandle.nullDevice
         netBuffer = ""; netBlock = [:]; netBlocks = 0
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
-            let text = String(decoding: h.availableData, as: UTF8.self)
+            let data = h.availableData
+            guard !data.isEmpty else {
+                h.readabilityHandler = nil
+                DispatchQueue.main.async { if let self, self.netProc === p { self.stopNetApps() } }
+                return
+            }
+            let text = String(decoding: data, as: UTF8.self)
             DispatchQueue.main.async { self?.consumeNet(text) }
         }
         guard (try? p.run()) != nil else { return }
@@ -320,10 +326,14 @@ final class DetailProvider {
     }
 
     func stopNetwork() {
+        stopNetApps()
+        stopMemTop()
+    }
+
+    private func stopNetApps() {
         netPipe?.fileHandleForReading.readabilityHandler = nil
         netProc?.terminate(); netProc = nil; netPipe = nil
         netApps = []
-        stopMemTop()
     }
 
     private var topProc: Process?
@@ -340,7 +350,13 @@ final class DetailProvider {
         p.standardInput = FileHandle.nullDevice
         topBuffer = ""; topBlock = []
         pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
-            let text = String(decoding: h.availableData, as: UTF8.self)
+            let data = h.availableData
+            guard !data.isEmpty else {
+                h.readabilityHandler = nil
+                DispatchQueue.main.async { if let self, self.topProc === p { self.stopMemTop() } }
+                return
+            }
+            let text = String(decoding: data, as: UTF8.self)
             DispatchQueue.main.async { self?.consumeTop(text) }
         }
         guard (try? p.run()) != nil else { return }
