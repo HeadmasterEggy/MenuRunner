@@ -23,7 +23,7 @@ extension Runner {
         ctx.translateBy(x: 8, y: 11)
         ctx.rotate(by: CGFloat(-turn * .pi))
         let co = abs(cos(turn * .pi)), si = abs(sin(turn * .pi))
-        let fit = min(1, 16 / (14 * co + 21 * si), 22 / (21 * co + 14 * si))
+        let fit = min(0.92, 15 / (14 * co + 21.2 * si), 21 / (21.2 * co + 14 * si))
         ctx.scaleBy(x: CGFloat(fit), y: CGFloat(fit))
         for y in [9.6, -9.6] {
             NSBezierPath(roundedRect: NSRect(x: -7, y: y - 1, width: 14, height: 2), xRadius: 1, yRadius: 1).fill()

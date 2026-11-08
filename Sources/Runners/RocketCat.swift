@@ -1,8 +1,8 @@
 import AppKit
 
 extension Runner {
-    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 12, size: NSSize(width: 36, height: 20), template: false, levels: 3) { t, level in
-        let W = 36, H = 20
+    static let rocketCat = Runner(id: "rocket", name: "橘猫火箭|Rocket Cat", frameCount: 12, size: NSSize(width: 36, height: 22), template: false, levels: 3) { t, level in
+        let W = 36, H = 22
         let f12 = Int((t / (2 * .pi) * 12).rounded()) % 12
         let f = f12 % 6
         let g = Int(Double(f12) * [1, 1.5, 2][level]) % 6
@@ -14,7 +14,7 @@ extension Runner {
         let flameY = c(1.0, 0.90, 0.30), flameO = c(1.0, 0.56, 0.16), flameR = c(0.96, 0.27, 0.22)
 
         var grid = [[NSColor?]](repeating: [NSColor?](repeating: nil, count: W), count: H)
-        let bob = f % 2 + 1
+        let bob = f % 2 + 2
         func set(_ x: Int, _ y: Int, _ col: NSColor) {
             let yy = y + bob
             if x >= 0 && x < W && yy >= 0 && yy < H { grid[yy][x] = col }
@@ -56,7 +56,7 @@ extension Runner {
         let rows = level == 2 ? [(10, 4), (11, 1), (12, 0), (13, 1), (14, 4)] : [(11, 2), (12, 0), (13, 2)]
         for (dy, short) in rows {
             let l = len - short
-            for i in 0..<max(l, 0) {
+            for i in 0..<min(max(l, 0), 9) {
                 let x = 9 - i
                 let col = i < l / 3 ? flameY : (i < l * 2 / 3 ? flameO : flameR)
                 if x >= 0 && grid[dy + bob][x] == nil { grid[dy + bob][x] = col }
@@ -67,7 +67,7 @@ extension Runner {
         ctx.setShouldAntialias(false)
         for y in 0..<H { for x in 0..<W { if let col = grid[y][x] { col.setFill(); NSRect(x: x, y: H - 1 - y, width: 1, height: 1).fill() } } }
 
-        for (sx, sy, ph) in [(3, 3, 0), (32, 2, 2), (6, 18, 4), (34, 17, 1)] {
+        for (sx, sy, ph) in [(3, 4, 0), (32, 3, 2), (6, 19, 4), (33, 18, 1)] {
             let phase = (g + ph) % 6
             guard phase < 4 else { continue }
             let col = NSColor(srgbRed: 1, green: 0.78, blue: 0.18, alpha: phase == 1 ? 1 : 0.75)
