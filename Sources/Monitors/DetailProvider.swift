@@ -224,7 +224,8 @@ final class DetailProvider {
         while accel != 0 {
             if let st = IORegistryEntryCreateCFProperty(accel, "PerformanceStatistics" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? [String: Any] {
                 for k in ["Device Utilization %", "Renderer Utilization %", "Tiler Utilization %", "In use system memory", "Alloc system memory"] {
-                    if let v = st[k] as? Int { gpuStats[k] = v }
+                    guard let v = st[k] as? Int else { continue }
+                    gpuStats[k] = k.hasSuffix("%") ? max(gpuStats[k] ?? 0, v) : (gpuStats[k] ?? 0) + v
                 }
             }
             var it: io_iterator_t = 0
