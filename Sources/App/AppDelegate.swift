@@ -67,9 +67,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onVisibilityChange = { [weak self] open in
             guard let self else { return }
             self.panelOpen = open
+            PowerRecorder.shared.setActive(open)
             self.updateAnimTimer()
             self.startSampling(interval: open ? self.refreshInterval : max(self.refreshInterval, 1.5))
         }
+        PowerRecorder.shared.onUpdate = { [weak self] in self?.panel.settle() }
+        PowerRecorder.shared.start()
         MachineSpec.loadModelName { [weak self] name in self?.panel.spec.model = name }
         sampleQueue.async { [sampler] in sampler.prime() }
         startSampling(interval: 1.5)
@@ -93,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("panel debug: shown=%d", self.panel.isVisible ? 1 : 0)
                 if let i = CommandLine.arguments.firstIndex(of: "--detail"), i + 1 < CommandLine.arguments.count {
                     let map: [String: DetailKind] = ["system": .system, "cpu": .cpu, "gpu": .gpu, "memory": .memory, "temps": .temps,
-                                                     "storage": .storage, "battery": .battery, "network": .network]
+                                                     "storage": .storage, "battery": .battery, "network": .network, "power": .power]
                     if let k = map[CommandLine.arguments[i + 1]] { self.panel.debugShow(k) }
                     if CommandLine.arguments[i + 1] == "settings" { self.showSettings() }
                 }
@@ -101,7 +104,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ n: Notification) { panel.detail.stopNetwork() }
+    func applicationWillTerminate(_ n: Notification) {
+        panel.detail.stopNetwork()
+        PowerRecorder.shared.flush()
+        PowerRecorder.shared.waitForSave()
+    }
 
     private func startSampling(interval: Double) {
         StatsModel.interval = interval
@@ -257,6 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let m = SettingsModel(values: [
             "runner": runner.id, "barMetric": barMetric, "barStyle": barStyle, "speedSource": speedSource,
             "refreshInterval": String(format: "%.1f", refreshInterval), "tempUnit": TempUnit.fahrenheit ? "F" : "C", "lang": Lang.mode,
+            "powerRecording": PowerRecorder.shared.enabled ? "on" : "off",
         ], login: SMAppService.mainApp.status == .enabled)
         m.apply = { [weak self] k, v in self?.apply(k, v) }
         m.options = { key in
@@ -278,6 +286,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return svc.status == .enabled
         }
         m.openActivityMonitor = { [weak self] in self?.openActivityMonitor() }
+        m.openAnalysis = { [weak self] in
+            guard let self else { return }
+            self.panel.hide()
+            AnalysisWindow.shared.show(spec: self.panel.spec)
+        }
         return m
     }()
     @objc private func showSettings() {
@@ -313,6 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "memory": usage = m.used / m.total
         default:       usage = l.total
         }
+        PowerRecorder.shared.ingest(s)
         panel.setBatteryTime(s.batteryTime)
         panel.sampleMain(pressure: s.pressure)
         model.update(cpu: l, gpu: g, memory: m, storage: s.storage, battery: bat,

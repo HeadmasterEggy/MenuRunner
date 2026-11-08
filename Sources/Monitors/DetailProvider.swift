@@ -8,7 +8,7 @@ struct NetInterface { var bsd: String, name: String, ipv4: String, up: Double, d
 struct ProcMem { var pid: pid_t, name: String, path: String?, bytes: UInt64, user: String }
 struct VolumeInfo { var name: String, path: String, used: Double, total: Double }
 
-enum DetailKind { case system, cpu, gpu, memory, temps, storage, battery, network }
+enum DetailKind { case system, cpu, gpu, memory, temps, storage, battery, network, power }
 
 enum AppIdentity {
     private static var cache: [pid_t: (key: String, name: String, path: String?)] = [:]
