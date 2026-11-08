@@ -1,4 +1,5 @@
 import AppKit
+import SystemConfiguration
 
 enum SystemDetail {
     static func rows(_ spec: MachineSpec) -> [(String, String)] {
@@ -19,9 +20,13 @@ enum SystemDetail {
             (L("硬盘", "Disk"), spec.diskText),
             (L("系统", "macOS"), "\(spec.os) (\(MachineSpec.sysctlString("kern.osversion")))"),
             (L("已运行", "Uptime"), uptime),
-            (L("主机名", "Computer Name"), Host.current().localizedName ?? "--"),
+            (L("主机名", "Computer Name"), computerName),
         ]
         for (i, s) in screens.prefix(2).enumerated() { r.append((i == 0 ? L("显示器", "Displays") : "", s)) }
         return r
+    }
+
+    private static var computerName: String {
+        (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "--"
     }
 }
