@@ -30,7 +30,7 @@ extension Runner {
             .draw(in: NSRect(x: 0, y: 0, width: 30, height: 18), angle: 0)
         NSGraphicsContext.current?.compositingOperation = .sourceOver
         ctx.endTransparencyLayer()
-        let y = ecg(26)
+        let y = min(max(ecg(26), 1.9), 16.1)
         NSBezierPath(ovalIn: NSRect(x: 26.1, y: y - 1.4, width: 2.8, height: 2.8)).fill()
     }
 }
