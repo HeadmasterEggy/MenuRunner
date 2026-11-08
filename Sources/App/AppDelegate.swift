@@ -1,5 +1,4 @@
 import AppKit
-import QuartzCore
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -54,12 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard dark != self.lastDark else { return }
             self.lastDark = dark
             self.frames = self.runner.frames(appearance: b.effectiveAppearance, level: self.runLevel)
-            self.installRunAnimation()
+            self.renderStatus()
         }
-        installRunAnimation()
         visibility.onChange = { [weak self] visible in
             guard let self else { return }
-            self.setRunSpeed(visible ? self.targetFps : 0, force: true)
+            self.updateAnimTimer()
             if visible { self.sample() }
         }
         visibility.watch(button.window)
@@ -69,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onVisibilityChange = { [weak self] open in
             guard let self else { return }
             self.panelOpen = open
+            self.updateAnimTimer()
             self.startSampling(interval: open ? self.refreshInterval : max(self.refreshInterval, 1.5))
         }
         MachineSpec.loadModelName { [weak self] name in self?.panel.spec.model = name }
@@ -209,7 +208,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             frames = r.frames(appearance: statusItem.button?.effectiveAppearance, level: runLevel); frameIndex = 0
             UserDefaults.standard.set(id, forKey: "runner")
             updateStatusImage()
-            installRunAnimation()
         case "barMetric":
             barMetric = id; UserDefaults.standard.set(id, forKey: "barMetric"); sample()
         case "barStyle":
@@ -361,104 +359,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if w > widthFloor { widthFloor = w; statusItem.length = w }
     }
 
-    private func updateStatusImage() {
-        let rf = frames[frameIndex]
-        let placeholder = NSImage(size: rf.size)
-        guard barStyle != "text", barMetric != "none" else {
-            statusItem.button?.image = placeholder; refreshWidth(); layoutRunLayer(); return
-        }
-        let gw: CGFloat
+    private var miniWidth: CGFloat? {
+        guard barStyle != "text", barMetric != "none" else { return nil }
         switch barMetric {
-        case "battery": gw = 22
-        case "temp", "batTemp": gw = 9
-        default: gw = 26
+        case "battery": return 22
+        case "temp", "batTemp": return 9
+        default: return 26
         }
+    }
+
+    private func updateStatusImage() {
+        renderStatus()
+        refreshWidth()
+    }
+
+    private func renderStatus() {
+        guard !frames.isEmpty, let button = statusItem.button else { return }
+        let rf = frames[frameIndex % frames.count]
+        let gw = miniWidth
         let h = max(rf.size.height, 18)
-        let size = NSSize(width: rf.size.width + 4 + gw, height: h)
+        let size = NSSize(width: rf.size.width + (gw.map { 4 + $0 } ?? 0), height: h)
+        let template = runner.template
+        let appearance = button.effectiveAppearance
         let img = NSImage(size: size, flipped: false) { [weak self] _ in
-            self?.drawMini(in: NSRect(x: rf.size.width + 4, y: (h - 14) / 2, width: gw, height: 14))
+            rf.draw(in: NSRect(x: 0, y: (h - rf.size.height) / 2, width: rf.size.width, height: rf.size.height))
+            guard let self, let gw else { return true }
+            let mini = NSRect(x: rf.size.width + 4, y: (h - 14) / 2, width: gw, height: 14)
+            NSGraphicsContext.saveGraphicsState()
+            self.drawMini(in: mini)
+            NSGraphicsContext.restoreGraphicsState()
+            if !template {
+                appearance.performAsCurrentDrawingAppearance {
+                    NSColor.labelColor.setFill()
+                    mini.insetBy(dx: -1, dy: -1).fill(using: .sourceAtop)
+                }
+            }
             return true
         }
-        img.isTemplate = true
-        statusItem.button?.image = img
-        refreshWidth()
-        layoutRunLayer()
+        img.isTemplate = template
+        button.image = img
     }
 
     private func refreshWidth() {
         setStatusTitle(statusItem.button?.title ?? "")
     }
 
-    private let runLayer = CALayer()
-    private var runFps: Double = 0
+    private var animInterval: Double = 0
 
-    private func cgFrames() -> [CGImage] {
-        let appearance = statusItem.button?.effectiveAppearance ?? NSAppearance.currentDrawing()
-        return frames.compactMap { img in
-            let scale: CGFloat = 2, size = img.size
-            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
-                                       bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                       colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-            rep.size = size
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-            NSGraphicsContext.current?.imageInterpolation = .none
-            img.draw(in: NSRect(origin: .zero, size: size))
-            if runner.template {
-                appearance.performAsCurrentDrawingAppearance {
-                    NSColor.labelColor.setFill()
-                    NSRect(origin: .zero, size: size).fill(using: .sourceAtop)
-                }
-            }
-            NSGraphicsContext.restoreGraphicsState()
-            return rep.cgImage
+    private func updateAnimTimer() {
+        let active = (visibility.visible || panel.isVisible) && targetFps > 0
+        guard active else { animTimer?.invalidate(); animTimer = nil; animInterval = 0; return }
+        let interval = 1 / targetFps
+        if animTimer != nil, abs(interval - animInterval) / animInterval < 0.05 { return }
+        animTimer?.invalidate()
+        animInterval = interval
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self, !self.frames.isEmpty else { return }
+            self.frameIndex = (self.frameIndex + 1) % self.frames.count
+            self.renderStatus()
         }
-    }
-
-    private func installRunAnimation() {
-        guard let button = statusItem.button else { return }
-        if runLayer.superlayer == nil {
-            button.wantsLayer = true
-            runLayer.magnificationFilter = .nearest
-            runLayer.contentsGravity = .resize
-            button.layer?.addSublayer(runLayer)
-        }
-        let cg = cgFrames()
-        guard !cg.isEmpty else { return }
-        runLayer.removeAllAnimations()
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        runLayer.contents = cg[0]
-        CATransaction.commit()
-        let anim = CAKeyframeAnimation(keyPath: "contents")
-        anim.values = cg
-        anim.calculationMode = .discrete
-        anim.duration = Double(cg.count)
-        anim.repeatCount = .infinity
-        runLayer.beginTime = 0; runLayer.timeOffset = 0
-        runLayer.add(anim, forKey: "run")
-        setRunSpeed(visibility.visible ? targetFps : 0, force: true)
-        layoutRunLayer()
-    }
-
-    private func setRunSpeed(_ fps: Double, force: Bool = false) {
-        guard force || abs(fps - runFps) > 0.05 else { return }
-        runFps = fps
-        let now = CACurrentMediaTime()
-        let local = runLayer.convertTime(now, from: nil)
-        runLayer.speed = Float(fps)
-        runLayer.timeOffset = local
-        runLayer.beginTime = now
-    }
-
-    private func layoutRunLayer() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let b = self.statusItem.button, let cell = b.cell as? NSButtonCell else { return }
-            let r = cell.imageRect(forBounds: b.bounds)
-            let size = self.frames.first?.size ?? .zero
-            CATransaction.begin(); CATransaction.setDisableActions(true)
-            self.runLayer.frame = CGRect(x: r.minX, y: r.midY - size.height / 2, width: size.width, height: size.height)
-            CATransaction.commit()
-        }
+        RunLoop.main.add(t, forMode: .common)
+        animTimer = t
     }
 
     private func drawMini(in r: NSRect) {
@@ -540,13 +501,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if runner.levels > 1, abs(raw - (Double(runLevel) + 0.5)) > 0.6 {
             runLevel = min(Int(raw), runner.levels - 1)
             frames = runner.frames(appearance: statusItem.button?.effectiveAppearance, level: runLevel)
-            installRunAnimation()
         }
-        let interval = 1 / fps
         if CommandLine.arguments.contains("--fps-log") { NSLog("fps debug: usage=%.0f%% fps=%.1f", u * 100, fps) }
-        _ = interval
         targetFps = fps
-        setRunSpeed(visibility.visible || panel.isVisible ? fps : 0)
+        updateAnimTimer()
     }
 
     @objc private func checkForUpdates() {
