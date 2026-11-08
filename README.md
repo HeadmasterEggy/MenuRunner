@@ -80,5 +80,5 @@ MenuRunner.app/Contents/MacOS/MenuRunner --preview out.png  # export runner fram
 
 - SoC / SSD temperatures come from the system HID temperature sensors through a private IOKit API (the same approach Stats and iStat use). No root needed, but future macOS versions may change it; the panel shows `--` when unavailable.
 - Fan speed is read from the SMC (`AppleSMC`), also without root. Macs without fans, like the MacBook Air, simply don't show the fan row or menu bar option.
-- Per-app energy comes from the kernel's per-process energy counter (`proc_pid_rusage`, `ri_energy_nj`) and whole-system power from the SMC (`PSTR`) or battery telemetry. Per-app figures cover CPU and GPU work only, so they add up to less than the whole-system number, which includes the display.
+- Per-app energy comes from the kernel's per-process energy counter (`proc_pid_rusage`, `ri_energy_nj`) and whole-system power from the SMC (`PSTR`) or battery telemetry. Per-app figures only count the energy of each process's own work on the chip, so they add up to less than the whole-system number, which includes the display.
 - Everything else uses public APIs: `host_statistics`, IORegistry, `getifaddrs` and IOKit power sources.

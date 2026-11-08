@@ -80,5 +80,5 @@ MenuRunner.app/Contents/MacOS/MenuRunner --preview out.png  # 导出 runner 帧�
 
 - 芯片 / SSD 温度通过 IOKit 私有接口读取系统 HID 温度传感器（Stats、iStat 也是这样做的），不需要管理员权限，但未来 macOS 版本可能变化，读不到时面板显示 `--`。
 - 风扇转速通过 SMC（`AppleSMC`）读取，同样不需要管理员权限。没有风扇的 Mac（例如 MacBook Air）不会显示风扇这一行和菜单栏选项。
-- 各应用耗电来自内核的进程能耗计数（`proc_pid_rusage` 的 `ri_energy_nj`），整机功耗来自 SMC（`PSTR`）或电池遥测。应用耗电只统计 CPU、GPU 等计算部分，所以加起来会小于包含屏幕在内的整机功耗。
+- 各应用耗电来自内核的进程能耗计数（`proc_pid_rusage` 的 `ri_energy_nj`），整机功耗来自 SMC（`PSTR`）或电池遥测。应用耗电只统计各进程自身在芯片上的能耗，所以加起来会小于包含屏幕在内的整机功耗。
 - 其余数据都用公开接口：`host_statistics`、IORegistry、`getifaddrs`、IOKit 电源信息。
