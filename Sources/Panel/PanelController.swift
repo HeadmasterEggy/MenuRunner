@@ -13,6 +13,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     static let width: CGFloat = 340, gap: CGFloat = 10, margin: CGFloat = 10
     private static let fanRowHeight: CGFloat = 25
+    private static let titleBadgeWidth: CGFloat = 12
     private let showsFans = FanMonitor.shared.hasFans
     private var gpuTempsHeight: CGFloat { 118 + (showsFans ? Self.fanRowHeight : 0) }
 
@@ -616,14 +617,13 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     private func drawMemory(_ w: CGFloat) {
         let m = model
-        Draw.title("memorychip", L("内存", "Memory"), in: w, tint: .systemPurple)
+        let titleEnd = Draw.title("memorychip", L("内存", "Memory"), in: w, tint: .systemPurple)
         let level = memoryPressure
         let (ptext, pcolor): (String, NSColor) = level >= 4 ? (L("压力紧张", "Critical"), .systemRed)
             : (level >= 2 ? (L("压力偏高", "Elevated"), .systemOrange) : (L("压力正常", "Normal"), .systemGreen))
-        let titleW = NSAttributedString(string: L("内存", "Memory"), attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).size().width
         let label = NSAttributedString(string: ptext,
                                        attributes: [.font: NSFont.systemFont(ofSize: 9, weight: .semibold), .foregroundColor: pcolor])
-        let bx = 14 + 18 + 6 + titleW + 18, bw = label.size().width + 12
+        let bx = titleEnd + 8, bw = label.size().width + 12
         pcolor.withAlphaComponent(0.18).setFill()
         NSBezierPath(roundedRect: NSRect(x: bx, y: 12, width: bw, height: 16), xRadius: 8, yRadius: 8).fill()
         label.draw(at: NSPoint(x: bx + 6, y: 13.5))
@@ -674,7 +674,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     private func drawBattery(_ w: CGFloat) {
         let m = model
-        Draw.title("battery.100", L("电池", "Battery"), in: w, tint: .systemGreen)
+        let titleEnd = Draw.title("battery.100", L("电池", "Battery"), in: w, tint: .systemGreen)
         guard let b = m.battery else {
             Draw.text(L("无电池", "No battery"), NSPoint(x: 14, y: 44), size: 11, color: .glassSecondary); return
         }
@@ -691,12 +691,15 @@ final class PanelController: NSObject, NSPopoverDelegate {
                      xRadius: 3, yRadius: 3).fill()
         if b.state == "charging" { Draw.symbol("bolt.fill", NSPoint(x: body.midX - 6, y: body.minY + 3), size: 11, color: .white) }
         Draw.text(Draw.pct(f), NSPoint(x: w - 14, y: 41), size: 18, weight: .semibold, right: true, mono: true)
+        var badgeLimit = w - 14
         if m.temps.battery != nil {
-            Draw.text(TempUnit.format(m.v("tBat")), NSPoint(x: w - 14, y: 13), size: 10, weight: .medium, color: .glassSecondary, right: true, mono: true)
+            let temp = TempUnit.format(m.v("tBat"))
+            Draw.text(temp, NSPoint(x: w - 14, y: 13), size: 10, weight: .medium, color: .glassSecondary, right: true, mono: true)
+            badgeLimit -= NSAttributedString(string: temp, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)]).size().width + 6
         }
-        let titleW = 14 + 22 + 6 + NSAttributedString(string: L("电池", "Battery"), attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).size().width
-        if b.state == "charging" { Draw.symbol("bolt.fill", NSPoint(x: titleW + 4, y: 12), size: 10, color: .systemYellow) }
-        else if b.state == "ac"  { Draw.symbol("powerplug.fill", NSPoint(x: titleW + 4, y: 12), size: 10, color: .glassSecondary) }
+        let badgeFits = titleEnd + 6 + Self.titleBadgeWidth <= badgeLimit
+        if badgeFits, b.state == "charging" { Draw.symbol("bolt.fill", NSPoint(x: titleEnd + 6, y: 12), size: 10, color: .systemYellow) }
+        else if badgeFits, b.state == "ac" { Draw.symbol("powerplug.fill", NSPoint(x: titleEnd + 6, y: 12), size: 10, color: .glassSecondary) }
         if let h = m.health {
             Draw.text(L("健康度", "Health"), NSPoint(x: 14, y: 72), size: 10, color: .glassSecondary)
             Draw.text(Draw.pct(m.v("health")), NSPoint(x: w - 14, y: 71), size: 11, weight: .medium, right: true, mono: true)

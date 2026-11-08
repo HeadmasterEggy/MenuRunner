@@ -28,14 +28,15 @@ enum Draw {
         return img.size.width
     }
 
-    static func title(_ icon: String, _ name: String, in w: CGFloat, tint: NSColor = .labelColor, chevron: Bool = true) {
+    @discardableResult
+    static func title(_ icon: String, _ name: String, in w: CGFloat, tint: NSColor = .labelColor, chevron: Bool = true) -> CGFloat {
         let iw = symbol(icon, NSPoint(x: 14, y: 12), size: 13, color: tint)
         let x = 14 + max(iw, 14) + 6
         text(name, NSPoint(x: x, y: 12), size: 12, weight: .semibold)
-        if chevron {
-            let tw = NSAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).size().width
-            symbol("chevron.right", NSPoint(x: x + tw + 4, y: 12), size: 9, color: .glassTertiary)
-        }
+        let tw = NSAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold)]).size().width
+        guard chevron else { return x + tw }
+        let cw = symbol("chevron.right", NSPoint(x: x + tw + 4, y: 12), size: 9, color: .glassTertiary)
+        return x + tw + 4 + cw
     }
 
     static func pct(_ v: Double) -> String { "\(Int((v * 100).rounded()))%" }
