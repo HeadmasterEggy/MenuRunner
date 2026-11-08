@@ -13,13 +13,16 @@ final class Sampler {
     private let netMon = NetMonitor()
     private var lastTemps: Temps?
     private var lastTempsAt: CFTimeInterval = 0
+    private static let activeTempInterval: CFTimeInterval = 2
+    private static let idleTempInterval: CFTimeInterval = 10
 
     func prime() { _ = cpu.load(); _ = netMon.rate() }
 
     func collect(needTemps: Bool, needFans: Bool, panelVisible: Bool) -> Sample {
         var s = Sample()
         s.load = cpu.load()
-        if lastTemps == nil || (needTemps && CACurrentMediaTime() - lastTempsAt >= 2) {
+        let tempInterval = needTemps ? Self.activeTempInterval : Self.idleTempInterval
+        if lastTemps == nil || CACurrentMediaTime() - lastTempsAt >= tempInterval {
             lastTemps = TempMonitor.shared.read(); lastTempsAt = CACurrentMediaTime()
         }
         s.temps = lastTemps ?? Temps()
