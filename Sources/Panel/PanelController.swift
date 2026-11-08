@@ -374,11 +374,12 @@ final class PanelController: NSObject, NSPopoverDelegate {
         cards = page.cards
         settle()
         guard let old = current, old !== page.view else { return }
+        let animate = animated && !CommandLine.arguments.contains("--no-anim")
         let dx: CGFloat = 36
         host.setFrameSize(page.size)
         old.setFrameOrigin(NSPoint(x: 0, y: page.size.height - old.frame.height))
-        page.view.setFrameOrigin(NSPoint(x: animated ? (forward ? dx : -dx) : 0, y: 0))
-        page.view.alphaValue = animated ? 0 : 1
+        page.view.setFrameOrigin(NSPoint(x: animate ? (forward ? dx : -dx) : 0, y: 0))
+        page.view.alphaValue = animate ? 0 : 1
         host.addSubview(page.view)
         current = page.view
         popover.contentSize = page.size
@@ -386,7 +387,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             old.removeFromSuperview(); old.alphaValue = 1; old.setFrameOrigin(.zero)
             page.view.window?.invalidateCursorRects(for: page.view)
         }
-        guard animated, !CommandLine.arguments.contains("--no-anim") else { finish(); return }
+        guard animate else { finish(); return }
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.34
             ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
