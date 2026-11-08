@@ -45,7 +45,10 @@ enum UpdateInstaller {
         let backup = target.deletingLastPathComponent().appendingPathComponent(".MenuRunner-old-\(UUID().uuidString).app")
         let script = """
         while /bin/kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do /bin/sleep 0.2; done
-        /bin/mv \(quoted(target.path)) \(quoted(backup.path)) || exit 1
+        if ! /bin/mv \(quoted(target.path)) \(quoted(backup.path)); then
+          /usr/bin/open \(quoted(target.path))
+          exit 1
+        fi
         if /usr/bin/ditto \(quoted(newApp.path)) \(quoted(target.path)); then
           /bin/rm -rf \(quoted(backup.path))
         else
