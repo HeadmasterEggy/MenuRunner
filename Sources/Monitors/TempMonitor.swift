@@ -19,9 +19,11 @@ final class TempMonitor {
         return c
     }()
 
+    private let lock = NSLock()
     private var cached: [(AnyObject, String)] = []
     private var cachedAt: CFTimeInterval = -1000
     private func sensorList() -> [(AnyObject, String)] {
+        lock.lock(); defer { lock.unlock() }
         let now = CACurrentMediaTime()
         if now - cachedAt < 30, !cached.isEmpty { return cached }
         guard let client, let services = IOHIDEventSystemClientCopyServices(client)?.takeRetainedValue() as? [AnyObject] else { return [] }
