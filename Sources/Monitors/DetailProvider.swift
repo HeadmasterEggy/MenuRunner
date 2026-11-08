@@ -253,7 +253,8 @@ final class DetailProvider {
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0 else { return nil }
         defer { freeifaddrs(head) }
-        var ips: [String: String] = [:], bytes: [String: (UInt64, UInt64)] = [:]
+        var ips: [String: String] = [:]
+        let bytes = InterfaceCounters.read().mapValues { ($0.rx, $0.tx) }
         var p = head
         while let ifa = p?.pointee {
             defer { p = ifa.ifa_next }
@@ -263,9 +264,6 @@ final class DetailProvider {
                 var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
                 getnameinfo(addr, socklen_t(addr.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST)
                 ips[name] = String(cString: host)
-            } else if addr.pointee.sa_family == UInt8(AF_LINK), let d = ifa.ifa_data {
-                let x = d.assumingMemoryBound(to: if_data.self).pointee
-                bytes[name] = (UInt64(x.ifi_ibytes), UInt64(x.ifi_obytes))
             }
         }
         defer { prevIf = bytes }
