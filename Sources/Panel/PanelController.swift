@@ -720,7 +720,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024)
         Draw.area(chart, m.netHistory.map { $0.down / peak }, scroll: m.scroll, color: .systemTeal, dot: true)
         Draw.area(chart, m.netHistory.map { $0.up / peak }, scroll: m.scroll, color: .systemPink, line: true)
-        Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 6, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
+        Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 12, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
         func bytes(_ b: Double) -> String { b >= 1_073_741_824 ? String(format: "%.2f GB", b / 1_073_741_824) : String(format: "%.0f MB", b / 1_048_576) }
         Draw.text(L("本次 ", "Session ") + "↑ " + bytes(netTotals.up) + "  ↓ " + bytes(netTotals.down),
                   NSPoint(x: chart.minX + 6, y: chart.minY + 3), size: 9, color: .glassTertiary, mono: true)
