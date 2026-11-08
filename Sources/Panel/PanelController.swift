@@ -236,9 +236,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     private func drawDetailHeader(_ w: CGFloat) {
         let h = detailTitle
-        Draw.symbol(h.icon, NSPoint(x: 40, y: 10), size: 15, color: h.tint)
-        Draw.text(h.title, NSPoint(x: 64, y: 8), size: 13, weight: .semibold)
-        Draw.text(h.sub, NSPoint(x: 64, y: 29), size: 10, color: .glassSecondary)
+        let iconWidth = Draw.symbol(h.icon, NSPoint(x: 40, y: 10), size: 15, color: h.tint)
+        let textX = max(64, 40 + iconWidth + 6)
+        Draw.text(h.title, NSPoint(x: textX, y: 8), size: 13, weight: .semibold)
+        Draw.text(h.sub, NSPoint(x: textX, y: 29), size: 10, color: .glassSecondary)
         Draw.text(h.value, NSPoint(x: w - 14, y: 12), size: 15, weight: .semibold, right: true, mono: true)
     }
 
