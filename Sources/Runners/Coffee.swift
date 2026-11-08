@@ -3,9 +3,9 @@ import AppKit
 extension Runner {
     static let coffee = Runner(id: "coffee", name: "咖啡|Coffee", frameCount: 24, size: NSSize(width: 22, height: 22), levels: 3) { t, level in
         let ctx = NSGraphicsContext.current!.cgContext
-        ctx.translateBy(x: 0.5, y: 0)
+        ctx.translateBy(x: 0.8, y: 0)
 
-        let K = 1.4, ax = 9.5
+        let K = 1.35, ax = 9.5
         ctx.saveGState()
         ctx.translateBy(x: ax, y: 0); ctx.scaleBy(x: K, y: K); ctx.translateBy(x: -ax, y: 0)
 
@@ -34,7 +34,7 @@ extension Runner {
 
         let left = ax + (3.6 - ax) * K, right = ax + (14.4 - ax) * K
         let mid = (left + right) / 2, amp = (right - left) / 2 - 2.2
-        let base = 10.4 * K + 0.6, top = [17.5, 20.6, 21.6][level]
+        let base = 10.4 * K + 0.6, top = [17.5, 19.6, 20.6][level]
         let n = 40, tt = t * [2, 3, 4][level]
         func wisp(_ dx: Double, _ ph: Double, _ ws: Double, _ topY: Double) -> NSBezierPath {
             let path = NSBezierPath()

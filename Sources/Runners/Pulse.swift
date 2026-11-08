@@ -23,14 +23,14 @@ extension Runner {
         let line = NSBezierPath()
         line.lineWidth = 1.5; line.lineCapStyle = .round; line.lineJoinStyle = .round
         line.move(to: pt(1.5, ecg(0)))
-        for i in 1...108 { let x = Double(i) * 0.25; line.line(to: pt(x + 1.5, ecg(x))) }
+        for i in 1...104 { let x = Double(i) * 0.25; line.line(to: pt(x + 1.5, ecg(x))) }
         line.stroke()
         NSGraphicsContext.current?.compositingOperation = .destinationIn
         NSGradient(colorsAndLocations: (NSColor.black.withAlphaComponent(0), 0), (NSColor.black, 0.55), (NSColor.black, 1))!
             .draw(in: NSRect(x: 0, y: 0, width: 30, height: 18), angle: 0)
         NSGraphicsContext.current?.compositingOperation = .sourceOver
         ctx.endTransparencyLayer()
-        let y = ecg(27)
-        NSBezierPath(ovalIn: NSRect(x: 27.1, y: y - 1.4, width: 2.8, height: 2.8)).fill()
+        let y = ecg(26)
+        NSBezierPath(ovalIn: NSRect(x: 26.1, y: y - 1.4, width: 2.8, height: 2.8)).fill()
     }
 }
