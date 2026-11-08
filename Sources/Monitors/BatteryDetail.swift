@@ -30,7 +30,7 @@ enum BatteryDetail {
         r.append((L("功率", "Power"), String(format: "%.1f W", mv * ma / 1_000_000)))
         if let t = TempMonitor.shared.read().battery { r.append((L("温度", "Temperature"), TempUnit.format(t))) }
         if let a = adapter, let w = a["Watts"] as? Int { r.append((L("电源适配器", "Power Adapter"), "\(w) W")) }
-        if let t = SystemInfo.batteryTime() { r.insert((t.label, t.value), at: min(2, r.count)) }
+        if SystemInfo.battery()?.state != "ac", let t = SystemInfo.batteryTime() { r.insert((t.label, t.value), at: min(2, r.count)) }
         return r
     }
 }
