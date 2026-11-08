@@ -36,6 +36,8 @@ The command must print nothing.
   - `Sources/Panel/` for the popover panel, its cards, drawing helpers and stats model
   - `Sources/Settings/` for the settings window
   - `Sources/Update/` for checking GitHub Releases and installing updates
+  - `Sources/Power/` for recording power history and building the report sent to AI
+  - `Sources/AI/` for the AI provider client, API key storage and the analysis window
   - `Sources/Debug/` for debug and command line helpers
 - Put a new file in the folder that matches its area, and add a new folder only when a new area appears.
 - Name each file after the main type it holds, for example `RocketCat.swift`.
