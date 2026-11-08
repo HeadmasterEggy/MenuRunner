@@ -23,6 +23,15 @@ enum UpdateInstaller {
         guard FileManager.default.isWritableFile(atPath: parent.path) else { throw InstallError.notWritable(parent.path) }
         let work = FileManager.default.temporaryDirectory.appendingPathComponent("MenuRunnerUpdate-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        do {
+            return try await stage(release, in: work)
+        } catch {
+            try? FileManager.default.removeItem(at: work)
+            throw error
+        }
+    }
+
+    private static func stage(_ release: Release, in work: URL) async throws -> URL {
         let (downloaded, response) = try await URLSession.shared.download(from: release.assetURL)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReleaseFeed.FeedError.badResponse(code) }
