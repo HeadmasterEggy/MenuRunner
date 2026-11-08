@@ -300,7 +300,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         for a in apps {
             rowHighlight(y, w, clickable: a.path != nil)
             ProcessMemory.icon(a.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            Draw.text(a.processes > 1 ? "\(a.name)  ×\(a.processes)" : a.name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium)
+            Draw.text(a.processes > 1 ? "\(a.name)  ×\(a.processes)" : a.name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium, maxWidth: w - 56 - 70)
             Draw.text(fmt(a.value), NSPoint(x: w - 14, y: y + 1), size: 12, weight: .medium, right: true, mono: true)
             Draw.bar(NSRect(x: 42, y: y + 20, width: w - 56, height: 3), a.value / maxV, .systemBlue)
             y += 30
@@ -411,7 +411,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             ProcessMemory.icon(p.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver,
                                             fraction: 1, respectFlipped: true, hints: nil)
             let name = p.processes > 1 ? "\(p.name)  ×\(p.processes)" : p.name
-            Draw.text(name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium)
+            Draw.text(name, NSPoint(x: 42, y: y + 1), size: 12, weight: .medium, maxWidth: w - 56 - 70)
             Draw.text(ProcessMemory.format(p.bytes), NSPoint(x: w - 14, y: y + 1), size: 12, weight: .medium, right: true, mono: true)
             let f = Double(p.bytes) / maxBytes
             Draw.bar(NSRect(x: 42, y: y + 20, width: w - 56, height: 3), f,
