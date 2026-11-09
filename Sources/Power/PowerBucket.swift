@@ -30,6 +30,28 @@ struct PowerBucket: Codable {
     var end: Date { start.addingTimeInterval(seconds) }
 }
 
+struct NameTable {
+    private var strings: Set<String> = []
+
+    mutating func intern(_ s: String) -> String {
+        if let existing = strings.firstIndex(of: s) { return strings[existing] }
+        strings.insert(s)
+        return s
+    }
+
+    mutating func intern(_ b: PowerBucket) -> PowerBucket {
+        var b = b
+        b.source = b.source.map { intern($0) }
+        b.apps = b.apps.map { a in
+            var a = a
+            a.name = intern(a.name)
+            a.path = a.path.map { intern($0) }
+            return a
+        }
+        return b
+    }
+}
+
 struct AppUsageReading {
     var energy: [AppStat]
     var cpu: [AppStat]
@@ -53,6 +75,7 @@ struct PowerAccumulator {
     init(start: Date) { self.start = start }
 
     var isEmpty: Bool { samples == 0 && powerSeconds == 0 }
+    var seconds: Double { isEmpty ? 0 : max(powerSeconds, 1) }
 
     mutating func add(_ s: Sample) {
         samples += 1

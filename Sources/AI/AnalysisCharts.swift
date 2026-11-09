@@ -49,19 +49,19 @@ struct MetricTiles: View {
 
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: columns), spacing: 10) {
-            ForEach(m.availableMetrics) { metric in tile(metric) }
+            ForEach(m.tiles) { t in tile(t) }
         }
     }
 
-    private func tile(_ metric: Metric) -> some View {
+    private func tile(_ t: MetricTile) -> some View {
+        let metric = t.metric
         let selected = m.metric == metric
-        let points = PowerStats.trend(m.buckets, metric: metric, step: m.step, app: nil, cores: m.cores)
         return Button { withAnimation(.snappy) { m.metric = metric } } label: {
             VStack(alignment: .leading, spacing: 3) {
                 Label(metric.title, systemImage: metric.icon).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Text(PowerStats.average(m.buckets, metric: metric).map(metric.format) ?? "--")
+                Text(metric.format(t.value))
                     .font(.title3.weight(.semibold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.6)
-                Sparkline(points: points, color: selected ? Color.accentColor : ChartPalette.accent)
+                Sparkline(points: t.points, color: selected ? Color.accentColor : ChartPalette.accent)
                     .frame(height: 18)
             }
             .padding(.horizontal, 10).padding(.vertical, 9)
@@ -106,29 +106,26 @@ struct TrendChart: View {
     private var showsApp: Bool { m.selectedApp != nil && points.contains { $0.appValue != nil } }
 
     private func nearest(_ d: Date) -> TrendPoint? {
-        points.min { abs($0.time.timeIntervalSince(d)) < abs($1.time.timeIntervalSince(d)) }
+        let list = points
+        var lo = 0, hi = list.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if list[mid].time < d { lo = mid + 1 } else { hi = mid }
+        }
+        let candidates = [lo - 1, lo].filter { list.indices.contains($0) }.map { list[$0] }
+        return candidates.min { abs($0.time.timeIntervalSince(d)) < abs($1.time.timeIntervalSince(d)) }
     }
 
-    private var step: TimeInterval { m.step }
-
-    private func band(_ r: ClosedRange<Date>) -> ClosedRange<Date> {
-        let start = r.lowerBound
-        let end = max(r.upperBound, start.addingTimeInterval(step))
-        guard let first = points.first?.time, let last = points.last?.time, first < last else { return start...end }
-        let hi = min(max(end, first), last)
-        let lo = min(max(start, first), max(hi.addingTimeInterval(-step), first))
-        return lo...hi
-    }
-
-    private func hits(_ d: Date) -> [(Int, Finding)] {
-        m.chartFindings.filter { band($0.2).contains(d) }.map { ($0.0, $0.1) }
+    private func hits(_ d: Date) -> [ChartFinding] {
+        m.chartFindings.filter { $0.band.contains(d) }
     }
 
     var body: some View {
         let selected = hover.flatMap(nearest)
+        let apps = showsApp
         Chart {
-            ForEach(m.chartFindings, id: \.1.id) { n, f, range in
-                let b = band(range)
+            ForEach(m.chartFindings) { c in
+                let f = c.finding, n = c.number, b = c.band
                 RectangleMark(xStart: .value("Start", b.lowerBound), xEnd: .value("End", b.upperBound))
                     .foregroundStyle(f.severity.color.opacity(m.focusFinding == f.id ? 0.3 : (m.focusFinding == nil ? 0.14 : 0.06)))
                     .annotation(position: .top, alignment: .leading, spacing: 2) {
@@ -144,7 +141,7 @@ struct TrendChart: View {
                     .foregroundStyle(ChartPalette.accent)
                     .interpolationMethod(.monotone)
             }
-            if showsApp {
+            if apps {
                 ForEach(points) { p in
                     if let a = p.appValue {
                         LineMark(x: .value("Time", p.time), y: .value("Value", a), series: .value("Series", "app"))
@@ -158,7 +155,7 @@ struct TrendChart: View {
                 RuleMark(x: .value("Time", s.time))
                     .foregroundStyle(Color.secondary.opacity(0.5))
                     .annotation(position: .top, alignment: .center, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
-                        tooltip(s)
+                        tooltip(s, apps: apps)
                     }
                 PointMark(x: .value("Time", s.time), y: .value("Value", s.value)).foregroundStyle(ChartPalette.accent).symbolSize(50)
             }
@@ -176,15 +173,16 @@ struct TrendChart: View {
                         switch phase {
                         case .active(let p):
                             guard let plot = proxy.plotFrame else { return }
-                            hover = proxy.value(atX: p.x - geo[plot].origin.x, as: Date.self)
+                            let t = proxy.value(atX: p.x - geo[plot].origin.x, as: Date.self).flatMap(nearest)?.time
+                            if t != hover { hover = t }
                         case .ended:
-                            hover = nil
+                            if hover != nil { hover = nil }
                         }
                     }
                     .gesture(SpatialTapGesture().onEnded { v in
                         guard let plot = proxy.plotFrame, let d = proxy.value(atX: v.location.x - geo[plot].origin.x, as: Date.self),
                               let hit = hits(d).first else { return }
-                        withAnimation(.snappy) { m.toggle(finding: hit.1) }
+                        withAnimation(.snappy) { m.toggle(finding: hit.finding) }
                     })
             }
         }
@@ -192,16 +190,16 @@ struct TrendChart: View {
         .padding(.top, 24)
     }
 
-    private func tooltip(_ p: TrendPoint) -> some View {
+    private func tooltip(_ p: TrendPoint, apps: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(p.time.formatted(.dateTime.month().day().hour().minute())).font(.caption2).foregroundStyle(.secondary)
             Text(m.metric.title + " " + m.metric.format(p.value)).font(.caption.weight(.semibold).monospacedDigit())
-            if showsApp, let a = p.appValue, let app = m.selectedApp {
+            if apps, let a = p.appValue, let app = m.selectedApp {
                 Text(app + " " + (m.metric == .power ? PowerMonitor.formatWatts(a) : String(format: "%.1f%%", a)))
                     .font(.caption.monospacedDigit()).foregroundStyle(ChartPalette.app)
             }
-            ForEach(hits(p.time), id: \.1.id) { n, f in
-                Text("\(n). " + f.title).font(.caption.weight(.medium)).foregroundStyle(f.severity.color).lineLimit(1)
+            ForEach(hits(p.time)) { c in
+                Text("\(c.number). " + c.finding.title).font(.caption.weight(.medium)).foregroundStyle(c.finding.severity.color).lineLimit(1)
             }
         }
         .padding(6)
@@ -298,9 +296,10 @@ struct DailyEnergyChart: View {
                         switch phase {
                         case .active(let p):
                             guard let plot = proxy.plotFrame else { return }
-                            hover = proxy.value(atX: p.x - geo[plot].origin.x, as: Date.self)
+                            let t = proxy.value(atX: p.x - geo[plot].origin.x, as: Date.self).map { Calendar.current.startOfDay(for: $0) }
+                            if t != hover { hover = t }
                         case .ended:
-                            hover = nil
+                            if hover != nil { hover = nil }
                         }
                     }
             }

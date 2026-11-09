@@ -1,5 +1,19 @@
 import AppKit
 
+struct MetricTile: Identifiable {
+    let metric: Metric
+    let value: Double
+    let points: [TrendPoint]
+    var id: Metric { metric }
+}
+
+struct ChartFinding: Identifiable {
+    let number: Int
+    let finding: Finding
+    let band: ClosedRange<Date>
+    var id: String { finding.id }
+}
+
 final class AnalysisModel: ObservableObject {
     static let ranges = [24, 72, 168, 336]
     static let shareLimit = 7
@@ -12,11 +26,18 @@ final class AnalysisModel: ObservableObject {
     @Published var apiKey = ""
     @Published var running = false
     @Published var result: String { didSet { parsed = AnalysisResult.parse(result) } }
-    @Published var parsed: AnalysisResult?
-    @Published var buckets: [PowerBucket] = []
-    @Published var metric: Metric = .power
-    @Published var rankKind: RankKind = .energy
-    @Published var selectedApp: String?
+    @Published var parsed: AnalysisResult? { didSet { updateFindings() } }
+    @Published private(set) var buckets: [PowerBucket] = [] { didSet { rebuild() } }
+    @Published var metric: Metric = .power { didSet { if metric != oldValue { updateTrend() } } }
+    @Published var rankKind: RankKind = .energy { didSet { if rankKind != oldValue { updateRanking() } } }
+    @Published var selectedApp: String? { didSet { if selectedApp != oldValue { updateTrend() } } }
+    @Published private(set) var tiles: [MetricTile] = []
+    @Published private(set) var trend: [TrendPoint] = []
+    @Published private(set) var ranking: [EnergyShare] = []
+    @Published private(set) var daily: [DailyEnergy] = []
+    @Published private(set) var chartFindings: [ChartFinding] = []
+    private(set) var step = PowerStats.step(hours: 24)
+    private(set) var recordedSeconds = 0.0
     @Published var category: String?
     @Published var focusFinding: String?
     @Published var resultDate: Date?
@@ -46,17 +67,61 @@ final class AnalysisModel: ObservableObject {
         buckets = PowerRecorder.shared.recent(hours: Double(rangeHours))
     }
 
-    var cores: Int { max(spec.pCores + spec.eCores, 1) }
-    var recordedSeconds: Double { buckets.reduce(0) { $0 + $1.seconds } }
-    var ranking: [EnergyShare] { PowerStats.ranking(buckets, kind: rankKind, limit: Self.shareLimit) }
-    var energyRanking: [EnergyShare] { PowerStats.ranking(buckets, kind: .energy, limit: Self.shareLimit) }
-    var step: TimeInterval {
-        guard let first = buckets.map(\.start).min(), let last = buckets.map(\.end).max() else { return PowerStats.step(hours: rangeHours) }
-        return PowerStats.step(hours: min(rangeHours, Int(ceil(last.timeIntervalSince(first) / 3600))))
+    func release() {
+        guard !running else { return }
+        buckets = []
     }
-    var trend: [TrendPoint] { PowerStats.trend(buckets, metric: metric, step: step, app: selectedApp, cores: cores) }
-    var daily: [DailyEnergy] { PowerStats.daily(buckets) }
-    var availableMetrics: [Metric] { Metric.allCases.filter { PowerStats.average(buckets, metric: $0) != nil } }
+
+    var cores: Int { max(spec.pCores + spec.eCores, 1) }
+    var availableMetrics: [Metric] { tiles.map(\.metric) }
+
+    private func rebuild() {
+        recordedSeconds = buckets.reduce(0) { $0 + $1.seconds }
+        if let first = buckets.first?.start, let last = buckets.last?.end {
+            step = PowerStats.step(hours: min(rangeHours, Int(ceil(last.timeIntervalSince(first) / 3600))))
+        } else {
+            step = PowerStats.step(hours: rangeHours)
+        }
+        let list = buckets, step = step, cores = cores
+        tiles = Metric.allCases.compactMap { metric in
+            PowerStats.average(list, metric: metric).map {
+                MetricTile(metric: metric, value: $0, points: PowerStats.trend(list, metric: metric, step: step, app: nil, cores: cores))
+            }
+        }
+        daily = PowerStats.daily(list)
+        updateRanking()
+        updateTrend()
+    }
+
+    private func updateRanking() {
+        ranking = PowerStats.ranking(buckets, kind: rankKind, limit: Self.shareLimit)
+    }
+
+    private func updateTrend() {
+        if selectedApp == nil, let tile = tiles.first(where: { $0.metric == metric }) {
+            trend = tile.points
+        } else {
+            trend = PowerStats.trend(buckets, metric: metric, step: step, app: selectedApp, cores: cores)
+        }
+        updateFindings()
+    }
+
+    private func updateFindings() {
+        guard let r = parsed, let c = Self.category(for: metric) else { chartFindings = []; return }
+        chartFindings = r.findings.enumerated().compactMap { i, f in
+            guard f.category == c, let range = f.range else { return nil }
+            return ChartFinding(number: i + 1, finding: f, band: band(range))
+        }
+    }
+
+    private func band(_ r: ClosedRange<Date>) -> ClosedRange<Date> {
+        let start = r.lowerBound
+        let end = max(r.upperBound, start.addingTimeInterval(step))
+        guard let first = trend.first?.time, let last = trend.last?.time, first < last else { return start...end }
+        let hi = min(max(end, first), last)
+        let lo = min(max(start, first), max(hi.addingTimeInterval(-step), first))
+        return lo...hi
+    }
 
     func toggle(app: String) {
         guard app != PowerStats.otherName else { return }
@@ -95,14 +160,6 @@ final class AnalysisModel: ObservableObject {
     func toggle(finding f: Finding) {
         focusFinding = focusFinding == f.id ? nil : f.id
         if focusFinding != nil, let c = f.category { show(category: c) }
-    }
-
-    var chartFindings: [(Int, Finding, ClosedRange<Date>)] {
-        guard let r = parsed, let c = Self.category(for: metric) else { return [] }
-        return r.findings.enumerated().compactMap { i, f in
-            guard f.category == c, let range = f.range else { return nil }
-            return (i + 1, f, range)
-        }
     }
 
     private func loadKey() { apiKey = APIKeyStore.load(provider.rawValue) }
