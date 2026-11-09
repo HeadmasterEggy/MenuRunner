@@ -105,6 +105,7 @@ final class AnalysisPanel: NSObject {
         p.close()
         panel = nil
         model.release()
+        DispatchQueue.main.async { _ = malloc_zone_pressure_relief(nil, 0) }
     }
 
     var onClose: () -> Void = {}
