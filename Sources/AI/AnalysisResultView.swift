@@ -95,9 +95,9 @@ struct AnalysisSummary: View {
                 }
             }
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
+        .glassCard(tint: ScoreColor.of(result.score).opacity(0.12))
     }
 
     private func bar(_ c: String, score: Int) -> some View {

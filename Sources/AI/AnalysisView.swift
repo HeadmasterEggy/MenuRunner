@@ -45,6 +45,36 @@ struct AnalysisView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            controls
+                .padding(16)
+                .glassCard()
+            if let e = m.error { Text(e).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
+            ScrollView {
+                GlassEffectContainer(spacing: GlassMetrics.spacing) {
+                    VStack(alignment: .leading, spacing: GlassMetrics.spacing) {
+                        if let r = m.parsed { AnalysisSummary(result: r, m: m) }
+                        dataSection
+                        aiSection
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            HStack {
+                Text(dateText)
+                Spacer()
+                Text(L("分析时会把汇总数据发送给所选的 AI 服务", "Summarized data is sent to the selected AI service"))
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 20).padding(.bottom, 16).padding(.top, 8)
+        .frame(minWidth: 640, minHeight: 640)
+        .background(WindowGlassBackground().ignoresSafeArea())
+        .onAppear { showSettings = (m.apiKey.isEmpty && m.provider == .anthropic) || m.model.isEmpty }
+    }
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label(L("AI 系统分析", "AI System Analysis"), systemImage: "sparkles").font(.title3.weight(.semibold))
                 Spacer()
@@ -62,31 +92,14 @@ struct AnalysisView: View {
                 if m.running {
                     ProgressView().controlSize(.small)
                     Text(L("分析中…", "Analyzing…")).font(.callout).foregroundStyle(.secondary)
-                    Button(L("取消", "Cancel")) { m.cancel() }
+                    Button(L("取消", "Cancel")) { m.cancel() }.buttonStyle(.glass)
                 } else {
-                    if !m.result.isEmpty { Button(L("复制", "Copy")) { m.copyResult() } }
-                    Button(L("开始 AI 分析", "Run AI Analysis")) { m.analyze() }.keyboardShortcut(.defaultAction)
+                    if !m.result.isEmpty { Button(L("复制", "Copy"), systemImage: "doc.on.doc") { m.copyResult() }.buttonStyle(.glass) }
+                    Button(L("开始 AI 分析", "Run AI Analysis"), systemImage: "sparkles") { m.analyze() }
+                        .buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
                 }
             }
-            if let e = m.error { Text(e).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let r = m.parsed { AnalysisSummary(result: r, m: m) }
-                    dataSection
-                    aiSection
-                }
-                .padding(.vertical, 4)
-            }
-            HStack {
-                Text(dateText)
-                Spacer()
-                Text(L("分析时会把汇总数据发送给所选的 AI 服务", "Summarized data is sent to the selected AI service"))
-            }
-            .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(20)
-        .frame(minWidth: 640, minHeight: 640)
-        .onAppear { showSettings = (m.apiKey.isEmpty && m.provider == .anthropic) || m.model.isEmpty }
     }
 
     private var stepText: String {
@@ -107,7 +120,7 @@ struct AnalysisView: View {
                     Button { withAnimation(.snappy) { m.selectedApp = nil } } label: {
                         Label(app, systemImage: "xmark.circle.fill").font(.caption)
                     }
-                    .buttonStyle(.bordered).controlSize(.small).tint(ChartPalette.app)
+                    .buttonStyle(.glass).controlSize(.small).tint(ChartPalette.app)
                 }
             } content: {
                 if m.trend.count >= 2 { TrendChart(m: m) } else {

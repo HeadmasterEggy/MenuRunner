@@ -31,9 +31,9 @@ struct ChartCard<Content: View, Accessory: View>: View {
             }
             content
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
+        .glassCard()
     }
 }
 
@@ -47,7 +47,7 @@ struct MetricTiles: View {
     @ObservedObject var m: AnalysisModel
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
             ForEach(m.availableMetrics) { metric in
                 let selected = m.metric == metric
                 Button { withAnimation(.snappy) { m.metric = metric } } label: {
@@ -59,9 +59,8 @@ struct MetricTiles: View {
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(selected ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.05)))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Color.accentColor : .clear, lineWidth: 1.5))
                     .contentShape(Rectangle())
+                    .glassCard(radius: GlassMetrics.tileRadius, tint: selected ? Color.accentColor.opacity(0.35) : nil, interactive: true)
                 }
                 .buttonStyle(.plain)
             }
@@ -172,7 +171,7 @@ struct TrendChart: View {
             }
         }
         .padding(6)
-        .background(RoundedRectangle(cornerRadius: 6).fill(.regularMaterial))
+        .glassCard(radius: 10)
     }
 }
 
