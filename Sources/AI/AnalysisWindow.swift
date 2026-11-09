@@ -39,8 +39,15 @@ final class AnalysisWindow: NSObject, NSWindowDelegate {
     private func installEditMenu() {
         guard NSApp.mainMenu == nil else { return }
         let main = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(NSMenuItem(title: L("隐藏 MenuRunner", "Hide MenuRunner"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: L("退出 MenuRunner", "Quit MenuRunner"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appItem.submenu = appMenu
+        main.addItem(appItem)
         let editItem = NSMenuItem()
-        let edit = NSMenu(title: "Edit")
+        let edit = NSMenu(title: L("编辑", "Edit"))
         for (title, action, key) in [("Cut", #selector(NSText.cut(_:)), "x"), ("Copy", #selector(NSText.copy(_:)), "c"),
                                      ("Paste", #selector(NSText.paste(_:)), "v"), ("Select All", #selector(NSText.selectAll(_:)), "a")] {
             edit.addItem(NSMenuItem(title: title, action: action, keyEquivalent: key))
