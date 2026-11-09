@@ -85,6 +85,8 @@ enum PowerReport {
             }
         }
         let all = totals.values.reduce(0) { $0 + $1.joules }
+        let hasCPU = buckets.contains { $0.apps.contains { $0.cpuSeconds != nil } }
+        let hasMemory = buckets.contains { $0.apps.contains { $0.peakMemory != nil } }
         var out = ["# Apps (name, energy Wh, average W over recorded time, share of per-app energy, average CPU as % of one core, peak memory MB, hours seen)"]
         let byEnergy = totals.sorted { $0.value.joules > $1.value.joules }.prefix(topAppCount).map(\.key)
         let byCPU = totals.sorted { $0.value.cpu > $1.value.cpu }.prefix(hourlyAppCount * 2).map(\.key)
@@ -92,9 +94,10 @@ enum PowerReport {
         var seen = Set<String>()
         for name in byEnergy + byCPU + byMemory where seen.insert(name).inserted {
             guard let t = totals[name] else { continue }
-            out.append(String(format: "%@, %.2f Wh, %.2f W, %.0f%%, %.0f%%, %.0f MB, %.1f h", name, t.joules / secondsPerHour,
-                              recorded > 0 ? t.joules / recorded : 0, all > 0 ? t.joules / all * 100 : 0,
-                              recorded > 0 ? t.cpu / recorded * 100 : 0, t.memory / bytesPerMB, t.active / secondsPerHour))
+            let cpu = hasCPU && recorded > 0 ? String(format: "%.0f%%", t.cpu / recorded * 100) : "-"
+            let memory = hasMemory ? String(format: "%.0f MB", t.memory / bytesPerMB) : "-"
+            out.append(String(format: "%@, %.2f Wh, %.2f W, %.0f%%, %@, %@, %.1f h", name, t.joules / secondsPerHour,
+                              recorded > 0 ? t.joules / recorded : 0, all > 0 ? t.joules / all * 100 : 0, cpu, memory, t.active / secondsPerHour))
         }
         return out
     }
