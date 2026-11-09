@@ -106,7 +106,7 @@ struct AnalysisSummary: View {
         return Button { withAnimation(.snappy) { m.toggle(category: c) } } label: {
             HStack(spacing: 6) {
                 Image(systemName: FindingCategory.icon(c)).font(.caption).frame(width: 14)
-                Text(FindingCategory.title(c)).font(.caption).frame(width: 34, alignment: .leading).lineLimit(1)
+                Text(FindingCategory.title(c)).font(.caption).frame(width: Lang.isZh ? 34 : 58, alignment: .leading).lineLimit(1)
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.primary.opacity(0.08))

@@ -79,10 +79,10 @@ struct TrendChart: View {
         points.min { abs($0.time.timeIntervalSince(d)) < abs($1.time.timeIntervalSince(d)) }
     }
 
-    private var step: TimeInterval { PowerStats.step(hours: m.rangeHours) }
+    private var step: TimeInterval { m.step }
 
     private func band(_ r: ClosedRange<Date>) -> ClosedRange<Date> {
-        let start = Date(timeIntervalSince1970: floor(r.lowerBound.timeIntervalSince1970 / step) * step)
+        let start = r.lowerBound
         let end = max(r.upperBound, start.addingTimeInterval(step))
         guard let first = points.first?.time, let last = points.last?.time, first < last else { return start...end }
         let hi = min(max(end, first), last)

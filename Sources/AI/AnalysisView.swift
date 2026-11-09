@@ -107,7 +107,7 @@ struct AnalysisView: View {
     }
 
     private var stepText: String {
-        let minutes = Int(PowerStats.step(hours: m.rangeHours) / 60)
+        let minutes = Int(m.step / 60)
         return minutes < 60 ? L("每 \(minutes) 分钟", "per \(minutes) min") : L("每 \(minutes / 60) 小时", "per \(minutes / 60) h")
     }
 
