@@ -17,6 +17,8 @@ final class AnalysisModel: ObservableObject {
     @Published var metric: Metric = .power
     @Published var rankKind: RankKind = .energy
     @Published var selectedApp: String?
+    @Published var category: String?
+    @Published var focusFinding: String?
     @Published var resultDate: Date?
     @Published var error: String?
     @Published var recordedHours = 0.0
@@ -57,6 +59,48 @@ final class AnalysisModel: ObservableObject {
         selectedApp = selectedApp == app ? nil : app
     }
 
+    static func metrics(for category: String) -> [Metric] {
+        switch category {
+        case "power": return [.power]
+        case "cpu": return [.cpu]
+        case "gpu": return [.gpu]
+        case "memory": return [.memory, .pressure]
+        case "thermal": return [.socTemp, .batteryTemp, .fan]
+        case "battery": return [.battery]
+        case "network": return [.netDown, .netUp]
+        default: return []
+        }
+    }
+
+    static func category(for metric: Metric) -> String? {
+        AnalysisResult.categories.first { metrics(for: $0).contains(metric) }
+    }
+
+    func show(category c: String) {
+        let options = Self.metrics(for: c)
+        guard !options.contains(metric), let first = options.first(where: availableMetrics.contains) else { return }
+        metric = first
+    }
+
+    func toggle(category c: String) {
+        category = category == c ? nil : c
+        focusFinding = nil
+        show(category: c)
+    }
+
+    func toggle(finding f: Finding) {
+        focusFinding = focusFinding == f.id ? nil : f.id
+        if focusFinding != nil, let c = f.category { show(category: c) }
+    }
+
+    var chartFindings: [(Int, Finding, ClosedRange<Date>)] {
+        guard let r = parsed, let c = Self.category(for: metric) else { return [] }
+        return r.findings.enumerated().compactMap { i, f in
+            guard f.category == c, let range = f.range else { return nil }
+            return (i + 1, f, range)
+        }
+    }
+
     private func loadKey() { apiKey = APIKeyStore.load(provider.rawValue) }
 
     func saveKey() { APIKeyStore.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), for: provider.rawValue) }
@@ -80,6 +124,8 @@ final class AnalysisModel: ObservableObject {
                 self.running = false
                 switch r {
                 case .success(let text):
+                    self.category = nil
+                    self.focusFinding = nil
                     self.result = text
                     self.refresh()
                     self.resultDate = Date()

@@ -80,9 +80,29 @@ struct TrendChart: View {
         points.min { abs($0.time.timeIntervalSince(d)) < abs($1.time.timeIntervalSince(d)) }
     }
 
+    private var step: TimeInterval { PowerStats.step(hours: m.rangeHours) }
+
+    private func band(_ r: ClosedRange<Date>) -> ClosedRange<Date> {
+        let start = Date(timeIntervalSince1970: floor(r.lowerBound.timeIntervalSince1970 / step) * step)
+        return start...max(r.upperBound, start.addingTimeInterval(step))
+    }
+
+    private func hits(_ d: Date) -> [(Int, Finding)] {
+        m.chartFindings.filter { band($0.2).contains(d) }.map { ($0.0, $0.1) }
+    }
+
     var body: some View {
         let selected = hover.flatMap(nearest)
         Chart {
+            ForEach(m.chartFindings, id: \.1.id) { n, f, range in
+                let b = band(range)
+                RectangleMark(xStart: .value("Start", b.lowerBound), xEnd: .value("End", b.upperBound))
+                    .foregroundStyle(f.severity.color.opacity(m.focusFinding == f.id ? 0.3 : (m.focusFinding == nil ? 0.14 : 0.06)))
+                    .annotation(position: .top, alignment: .leading, spacing: 2) {
+                        Text("\(n)").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .frame(width: 16, height: 16).background(Circle().fill(f.severity.color))
+                    }
+            }
             ForEach(points) { p in
                 AreaMark(x: .value("Time", p.time), y: .value("Value", p.value), series: .value("Series", "system"))
                     .foregroundStyle(LinearGradient(colors: [ChartPalette.accent.opacity(0.4), ChartPalette.accent.opacity(0.03)], startPoint: .top, endPoint: .bottom))
@@ -128,6 +148,11 @@ struct TrendChart: View {
                             hover = nil
                         }
                     }
+                    .gesture(SpatialTapGesture().onEnded { v in
+                        guard let plot = proxy.plotFrame, let d = proxy.value(atX: v.location.x - geo[plot].origin.x, as: Date.self),
+                              let hit = hits(d).first else { return }
+                        withAnimation(.snappy) { m.toggle(finding: hit.1) }
+                    })
             }
         }
         .frame(height: 190)
@@ -141,6 +166,9 @@ struct TrendChart: View {
             if showsApp, let a = p.appValue, let app = m.selectedApp {
                 Text(app + " " + (m.metric == .power ? PowerMonitor.formatWatts(a) : String(format: "%.1f%%", a)))
                     .font(.caption.monospacedDigit()).foregroundStyle(ChartPalette.app)
+            }
+            ForEach(hits(p.time), id: \.1.id) { n, f in
+                Text("\(n). " + f.title).font(.caption.weight(.medium)).foregroundStyle(f.severity.color).lineLimit(1)
             }
         }
         .padding(6)
@@ -189,6 +217,10 @@ struct RankingChart: View {
                 Circle().fill(color).frame(width: 8, height: 8)
                 Image(nsImage: ProcessMemory.icon(s.path)).resizable().frame(width: 16, height: 16)
                 Text(ChartPalette.label(s)).lineLimit(1)
+                if let v = m.parsed?.verdict(for: s.name) {
+                    Image(systemName: v.verdict.icon).font(.caption).foregroundStyle(v.verdict.color)
+                    if v.verdict != .expected { Text(v.note).font(.caption).foregroundStyle(v.verdict.color).lineLimit(1) }
+                }
                 Spacer(minLength: 8)
                 Text(m.rankKind.format(s.joules, seconds: m.recordedSeconds)).foregroundStyle(.secondary)
                 if m.rankKind != .memory { Text(String(format: "%.0f%%", share * 100)).frame(width: 40, alignment: .trailing) }
@@ -200,7 +232,7 @@ struct RankingChart: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 ? s.name : (hovered == s.name ? nil : hovered) }
-        .help(s.name == PowerStats.otherName ? "" : L("点击在趋势图里查看这个应用", "Click to show this app in the trend chart"))
+        .help(s.name == PowerStats.otherName ? "" : (m.parsed?.verdict(for: s.name).map { $0.verdict.text + "：" + $0.note + "\n" } ?? "") + L("点击在趋势图里查看这个应用", "Click to show this app in the trend chart"))
     }
 }
 

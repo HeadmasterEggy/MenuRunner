@@ -16,17 +16,23 @@ struct LevelBadge: View {
 extension Level {
     var color: Color { self == .high ? .red : (self == .medium ? .orange : .green) }
     var severityText: String { self == .high ? L("严重", "High") : (self == .medium ? L("注意", "Medium") : L("轻微", "Low")) }
+    var bars: Int { self == .high ? 3 : (self == .medium ? 2 : 1) }
     var impactText: String { self == .high ? L("影响大", "High impact") : (self == .medium ? L("影响中", "Medium impact") : L("影响小", "Low impact")) }
 }
 
 extension Verdict {
     var color: Color { self == .expected ? .green : (self == .watch ? .orange : .red) }
     var text: String { self == .expected ? L("正常", "Expected") : (self == .watch ? L("留意", "Watch") : L("异常", "Abnormal")) }
+    var icon: String { self == .expected ? "checkmark.circle.fill" : (self == .watch ? "exclamationmark.circle.fill" : "xmark.octagon.fill") }
+}
+
+enum ScoreColor {
+    static func of(_ score: Int) -> Color { score >= 80 ? .green : (score >= 60 ? .yellow : (score >= 40 ? .orange : .red)) }
 }
 
 struct ScoreRing: View {
     let score: Int
-    private var color: Color { score >= 80 ? .green : (score >= 60 ? .yellow : (score >= 40 ? .orange : .red)) }
+    private var color: Color { ScoreColor.of(score) }
 
     var body: some View {
         ZStack {
@@ -57,125 +63,158 @@ enum FindingCategory {
         }
     }
 
-    static func metric(_ c: String) -> Metric? {
+    static func icon(_ c: String) -> String {
         switch c {
-        case "power": return .power
-        case "cpu": return .cpu
-        case "gpu": return .gpu
-        case "memory": return .memory
-        case "thermal": return .socTemp
-        case "battery": return .battery
-        case "network": return .netDown
-        default: return nil
+        case "power": return "bolt.fill"
+        case "cpu": return "cpu"
+        case "gpu": return "cpu.fill"
+        case "memory": return "memorychip"
+        case "thermal": return "thermometer.medium"
+        case "battery": return "battery.75percent"
+        case "network": return "network"
+        default: return "circle"
         }
     }
 }
 
-struct AnalysisResultView: View {
+struct AnalysisSummary: View {
     let result: AnalysisResult
     @ObservedObject var m: AnalysisModel
-    @State private var category: String?
-    @State private var expanded: Set<String> = []
 
-    private func path(for name: String) -> String? {
-        m.buckets.lazy.flatMap(\.apps).first { $0.name == name }?.path
+    private func count(_ c: String) -> [Level] { result.findings.filter { $0.category == c }.map(\.severity) }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 18) {
+            ScoreRing(score: result.score)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(result.headline).font(.headline).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                if !result.orderedScores.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 6) {
+                        ForEach(result.orderedScores, id: \.0) { c, score in bar(c, score: score) }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
     }
 
-    private var categories: [String] {
-        var seen = Set<String>()
-        return result.findings.compactMap(\.category).filter { seen.insert($0).inserted }
-    }
-
-    private var visibleFindings: [Finding] {
-        result.findings.filter { category == nil || $0.category == category }.sorted { $0.severity < $1.severity }
-    }
-
-    private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title).font(.caption.weight(.medium))
-                .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(Capsule().fill(selected ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.07)))
+    private func bar(_ c: String, score: Int) -> some View {
+        let selected = m.category == c
+        let levels = count(c)
+        return Button { withAnimation(.snappy) { m.toggle(category: c) } } label: {
+            HStack(spacing: 6) {
+                Image(systemName: FindingCategory.icon(c)).font(.caption).frame(width: 14)
+                Text(FindingCategory.title(c)).font(.caption).frame(width: 34, alignment: .leading).lineLimit(1)
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.08))
+                        Capsule().fill(ScoreColor.of(score)).frame(width: g.size.width * CGFloat(score) / 100)
+                    }
+                }
+                .frame(height: 6)
+                Text("\(score)").font(.caption.monospacedDigit()).frame(width: 24, alignment: .trailing)
+                HStack(spacing: 2) {
+                    ForEach(Array(levels.enumerated()), id: \.offset) { _, l in Circle().fill(l.color).frame(width: 5, height: 5) }
+                }
+                .frame(width: 22, alignment: .leading)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Color.accentColor.opacity(0.2) : .clear))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(L("点击查看这一类的图表和发现", "Click to see this category's chart and findings"))
+    }
+}
+
+struct AnalysisDetails: View {
+    let result: AnalysisResult
+    @ObservedObject var m: AnalysisModel
+    @State private var expanded: Set<String> = []
+
+    private var findings: [(Int, Finding)] {
+        result.findings.enumerated().map { ($0 + 1, $1) }.filter { m.category == nil || $0.1.category == m.category }
+    }
+
+    private static let timeFormat: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M/d HH:mm"
+        return f
+    }()
+
+    private func timeText(_ r: ClosedRange<Date>) -> String {
+        let a = Self.timeFormat.string(from: r.lowerBound)
+        guard r.upperBound > r.lowerBound else { return a }
+        let sameDay = Calendar.current.isDate(r.lowerBound, inSameDayAs: r.upperBound)
+        return a + "–" + (sameDay ? r.upperBound.formatted(date: .omitted, time: .shortened) : Self.timeFormat.string(from: r.upperBound))
+    }
+
+    private func toggle(_ id: String) {
+        withAnimation(.snappy) { if expanded.contains(id) { expanded.remove(id) } else { expanded.insert(id) } }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 18) {
-                ScoreRing(score: result.score)
-                Text(result.headline).font(.title3.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: 14) {
+            if !result.findings.isEmpty { findingsCard }
+            if !result.suggestions.isEmpty { suggestionsCard }
+        }
+    }
+
+    private var findingsCard: some View {
+        ChartCard(title: L("发现", "Findings") + (m.category.map { " · " + FindingCategory.title($0) } ?? ""), icon: "magnifyingglass") {
+            if m.category != nil {
+                Button { withAnimation(.snappy) { m.category = nil } } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
-            if !result.suggestions.isEmpty {
-                ChartCard(title: L("建议（按影响排序）", "Suggestions (by impact)"), icon: "lightbulb.fill") {
-                    ForEach(Array(result.suggestions.enumerated()), id: \.element.id) { i, s in
-                        let open = expanded.contains(s.id)
-                        HStack(alignment: .top, spacing: 10) {
-                            Text("\(i + 1)").font(.callout.weight(.bold).monospacedDigit()).foregroundStyle(.white)
-                                .frame(width: 22, height: 22).background(Circle().fill(s.impact.color))
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack {
-                                    Text(s.title).font(.callout.weight(.semibold))
-                                    LevelBadge(text: s.impact.impactText, color: s.impact.color)
-                                    Spacer()
-                                    Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.tertiary)
-                                }
-                                Text(s.detail).font(.callout).foregroundStyle(.secondary)
-                                    .lineLimit(open ? nil : 1).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture { withAnimation(.snappy) { if open { expanded.remove(s.id) } else { expanded.insert(s.id) } } }
+        } content: {
+            ForEach(findings, id: \.1.id) { n, f in
+                let focused = m.focusFinding == f.id
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text("\(n)").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                            .frame(width: 16, height: 16).background(Circle().fill(f.severity.color))
+                        if let c = f.category { Image(systemName: FindingCategory.icon(c)).font(.caption).foregroundStyle(.secondary) }
+                        Text(f.title).font(.callout.weight(.medium)).lineLimit(1)
+                        Spacer(minLength: 4)
+                        if let r = f.range { Text(timeText(r)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1) }
+                    }
+                    if focused {
+                        Text(f.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.leading, 22)
                     }
                 }
+                .padding(.horizontal, 6).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(focused ? f.severity.color.opacity(0.15) : .clear))
+                .contentShape(Rectangle())
+                .onTapGesture { withAnimation(.snappy) { m.toggle(finding: f) } }
+                .help(f.detail)
             }
-            if !result.findings.isEmpty {
-                ChartCard(title: L("发现", "Findings"), icon: "magnifyingglass") {
-                    if categories.count > 1 {
-                        HStack(spacing: 6) {
-                            chip(L("全部", "All"), selected: category == nil) { withAnimation(.snappy) { category = nil } }
-                            ForEach(categories, id: \.self) { c in
-                                chip(FindingCategory.title(c), selected: category == c) {
-                                    withAnimation(.snappy) {
-                                        category = category == c ? nil : c
-                                        if let metric = FindingCategory.metric(c), m.availableMetrics.contains(metric) { m.metric = metric }
-                                    }
-                                }
+        }
+    }
+
+    private var suggestionsCard: some View {
+        ChartCard(title: L("建议", "Suggestions"), icon: "lightbulb.fill") {
+            ForEach(result.suggestions) { s in
+                let open = expanded.contains(s.id)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        HStack(spacing: 2) {
+                            ForEach(0..<3, id: \.self) { i in
+                                RoundedRectangle(cornerRadius: 1).fill(i < s.impact.bars ? s.impact.color : Color.primary.opacity(0.12)).frame(width: 4, height: 12)
                             }
                         }
+                        Text(s.title).font(.callout.weight(.medium)).lineLimit(1)
+                        Spacer(minLength: 4)
                     }
-                    ForEach(visibleFindings) { f in
-                        HStack(alignment: .top, spacing: 10) {
-                            RoundedRectangle(cornerRadius: 2).fill(f.severity.color).frame(width: 4)
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack { Text(f.title).font(.callout.weight(.semibold)); LevelBadge(text: f.severity.severityText, color: f.severity.color) }
-                                Text(f.detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
+                    if open {
+                        Text(s.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.leading, 20)
                     }
                 }
-            }
-            if !result.apps.isEmpty {
-                ChartCard(title: L("应用点评", "Apps"), icon: "app.badge") {
-                    ForEach(result.apps) { a in
-                        let selected = m.selectedApp == a.name
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Image(nsImage: ProcessMemory.icon(path(for: a.name))).resizable().frame(width: 16, height: 16).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
-                            Text(a.name).font(.callout.weight(.medium)).frame(width: 130, alignment: .leading).lineLimit(1)
-                            LevelBadge(text: a.verdict.text, color: a.verdict.color)
-                            Text(a.note).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(selected ? ChartPalette.app.opacity(0.15) : .clear))
-                        .contentShape(Rectangle())
-                        .onTapGesture { withAnimation(.snappy) { m.toggle(app: a.name) } }
-                        .help(L("点击在趋势图里查看这个应用", "Click to show this app in the trend chart"))
-                    }
-                }
+                .padding(.horizontal, 6).padding(.vertical, 4)
+                .contentShape(Rectangle())
+                .onTapGesture { toggle(s.id) }
+                .help(s.impact.impactText + "：" + s.detail)
             }
         }
     }

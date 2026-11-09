@@ -71,6 +71,7 @@ struct AnalysisView: View {
             if let e = m.error { Text(e).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    if let r = m.parsed { AnalysisSummary(result: r, m: m) }
                     dataSection
                     aiSection
                 }
@@ -133,7 +134,7 @@ struct AnalysisView: View {
 
     @ViewBuilder private var aiSection: some View {
         if let r = m.parsed {
-            AnalysisResultView(result: r, m: m)
+            AnalysisDetails(result: r, m: m)
         } else if !m.result.isEmpty {
             ChartCard(title: L("AI 分析", "AI analysis"), icon: "sparkles") { MarkdownText(text: m.result) }
         } else {
