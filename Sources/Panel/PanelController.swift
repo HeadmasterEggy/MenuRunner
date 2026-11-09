@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 import QuartzCore
 
-final class PanelController: NSObject, NSPopoverDelegate {
+final class PanelController: NSObject {
     let model: StatsModel
-    let popover = NSPopover()
+    private var menuPanel: MenuPanel!
     private var cards: [CardView] = []
     private var timer: Timer?
     private var lastTick = CACurrentMediaTime()
@@ -21,10 +21,6 @@ final class PanelController: NSObject, NSPopoverDelegate {
     init(model: StatsModel) {
         self.model = model
         super.init()
-        popover.behavior = .applicationDefined
-        if CommandLine.arguments.contains("--light") { popover.appearance = NSAppearance(named: .aqua) }
-        popover.animates = true
-        popover.delegate = self
         build()
         detail.onUpdate = { [weak self] in self?.settle() }
     }
@@ -88,10 +84,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
         mainPage.view.autoresizingMask = [.minYMargin]
         host.addSubview(mainPage.view)
         current = mainPage.view
-        let vc = NSViewController()
-        vc.view = host
-        popover.contentViewController = vc
-        popover.contentSize = mainPage.size
+        menuPanel = MenuPanel(content: host, size: mainPage.size)
+        if CommandLine.arguments.contains("--light") { menuPanel.appearance = NSAppearance(named: .aqua) }
+        menuPanel.onClose = { [weak self] in self?.panelDidClose() }
+        menuPanel.onEscape = { [weak self] in self?.hide() }
     }
 
     static let procRows = 8, topProcRows = 10
@@ -225,7 +221,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
     @objc private func backToMain() {
         detailTimer?.invalidate(); detailTimer = nil
         detail.stopNetwork()
-        switchTo(mainPage, forward: false, animated: popover.isShown)
+        switchTo(mainPage, forward: false, animated: menuPanel.isShown)
     }
 
     private var detailTitle: (icon: String, tint: NSColor, title: String, value: String, sub: String) {
@@ -299,9 +295,9 @@ final class PanelController: NSObject, NSPopoverDelegate {
     }
 
     func openAnalysis() {
-        guard let w = popover.contentViewController?.view.window else { return }
+        guard menuPanel.isShown else { return }
         AnalysisPanel.shared.onClose = { AnalysisPanel.shared.hide() }
-        AnalysisPanel.shared.show(spec: spec, beside: w.frame, screen: w.screen)
+        AnalysisPanel.shared.show(spec: spec, beside: menuPanel.frame, screen: menuPanel.screen)
     }
 
     private func drawApps(_ w: CGFloat, _ title: String, _ apps: [AppStat], _ fmt: (Double) -> String) {
@@ -398,7 +394,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         page.view.alphaValue = animate ? 0 : 1
         host.addSubview(page.view)
         current = page.view
-        popover.contentSize = page.size
+        menuPanel.contentSize = page.size
         let finish = {
             old.removeFromSuperview(); old.alphaValue = 1; old.setFrameOrigin(.zero)
             page.view.window?.invalidateCursorRects(for: page.view)
@@ -473,11 +469,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
     }
 
     func show(below button: NSStatusBarButton) {
-        if popover.isShown { popover.close() }
         isOpen = true
         model.resetShown()
         settle(); settleUntil += 0.6
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        menuPanel.show(below: button)
         detail.prime()
         startTimer()
         if outsideMonitor == nil {
@@ -491,14 +486,12 @@ final class PanelController: NSObject, NSPopoverDelegate {
     func hide() {
         guard isOpen else { return }
         isOpen = false
-        popover.performClose(nil)
+        menuPanel.close()
     }
 
     private var outsideMonitor: Any?
 
-    func popoverWillClose(_ notification: Notification) { isOpen = false }
-
-    func popoverDidClose(_ notification: Notification) {
+    private func panelDidClose() {
         guard !isOpen else { return }
         if let m = outsideMonitor { NSEvent.removeMonitor(m); outsideMonitor = nil }
         AnalysisPanel.shared.hide()
@@ -522,7 +515,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         frameCount += 1
         if CommandLine.arguments.contains("--open-panel"), frameCount % 60 == 0 {
             NSLog("panel debug: frames=%d cards=%d host=%@ content=%@ win=%@ subviews=%d", frameCount, cards.count,
-                  NSStringFromSize(host.frame.size), NSStringFromSize(popover.contentSize),
+                  NSStringFromSize(host.frame.size), NSStringFromSize(menuPanel.contentSize),
                   NSStringFromSize(host.window?.frame.size ?? .zero), host.subviews.count)
         }
         let now = CACurrentMediaTime()
