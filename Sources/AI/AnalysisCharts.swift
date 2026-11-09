@@ -123,7 +123,7 @@ struct TrendChart: View {
             if let s = selected {
                 RuleMark(x: .value("Time", s.time))
                     .foregroundStyle(Color.secondary.opacity(0.5))
-                    .annotation(position: .top, alignment: .center, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                    .annotation(position: .top, alignment: .center, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                         tooltip(s)
                     }
                 PointMark(x: .value("Time", s.time), y: .value("Value", s.value)).foregroundStyle(ChartPalette.accent).symbolSize(50)
