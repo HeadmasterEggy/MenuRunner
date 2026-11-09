@@ -176,7 +176,7 @@ struct AnalysisDetails: View {
                         Text("\(n)").font(.caption2.weight(.bold)).foregroundStyle(.white)
                             .frame(width: 16, height: 16).background(Circle().fill(f.severity.color))
                         if let c = f.category { Image(systemName: FindingCategory.icon(c)).font(.caption).foregroundStyle(.secondary) }
-                        Text(f.title).font(.callout.weight(.medium)).lineLimit(1)
+                        Text(f.title).font(.callout.weight(.medium)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 4)
                         if let r = f.range { Text(timeText(r)).font(.caption2.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1) }
                     }

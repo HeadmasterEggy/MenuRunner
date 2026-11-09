@@ -83,7 +83,10 @@ struct TrendChart: View {
 
     private func band(_ r: ClosedRange<Date>) -> ClosedRange<Date> {
         let start = Date(timeIntervalSince1970: floor(r.lowerBound.timeIntervalSince1970 / step) * step)
-        return start...max(r.upperBound, start.addingTimeInterval(step))
+        let end = max(r.upperBound, start.addingTimeInterval(step))
+        guard let first = points.first?.time, let last = points.last?.time, first < last else { return start...end }
+        let lo = min(max(start, first), last), hi = max(min(end, last), lo)
+        return lo...hi
     }
 
     private func hits(_ d: Date) -> [(Int, Finding)] {
