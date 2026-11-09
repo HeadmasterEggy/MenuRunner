@@ -114,6 +114,8 @@ struct AnalysisView: View {
         HStack(spacing: 8) {
             Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }
                 .buttonStyle(.glass)
+                .focusEffectDisabled()
+                .accessibilityLabel(L("AI 服务设置", "AI service settings"))
                 .help(L("AI 服务设置", "AI service settings"))
                 .popover(isPresented: $showSettings, arrowEdge: .bottom) { settings.padding(16).frame(width: 440) }
             if m.running {
@@ -122,7 +124,8 @@ struct AnalysisView: View {
             } else {
                 if !m.result.isEmpty {
                     Button { m.copyResult() } label: { Image(systemName: "doc.on.doc") }
-                        .buttonStyle(.glass).help(L("复制分析结果", "Copy the analysis"))
+                        .buttonStyle(.glass).focusEffectDisabled()
+                        .accessibilityLabel(L("复制分析结果", "Copy the analysis")).help(L("复制分析结果", "Copy the analysis"))
                 }
                 Button(L("开始分析", "Analyze"), systemImage: "sparkles") { m.analyze() }
                     .buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
@@ -143,6 +146,7 @@ struct AnalysisView: View {
                     summary.frame(maxWidth: .infinity, alignment: .top)
                     rankingCard.frame(maxWidth: .infinity, alignment: .top)
                 }
+                .fixedSize(horizontal: false, vertical: true)
                 MetricTiles(m: m, columns: 6)
                 trendCard
                 details

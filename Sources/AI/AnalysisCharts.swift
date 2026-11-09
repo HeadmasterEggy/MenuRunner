@@ -32,7 +32,7 @@ struct ChartCard<Content: View, Accessory: View>: View {
             content
         }
         .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .glassCard()
     }
 }
@@ -216,7 +216,7 @@ struct RankingChart: View {
     var body: some View {
         let shares = m.ranking
         let total = max(shares.reduce(0) { $0 + $1.joules }, 0.0001)
-        HStack(alignment: .center, spacing: 20) {
+        HStack(alignment: .center, spacing: 14) {
             Chart(Array(shares.enumerated()), id: \.element.id) { i, s in
                 let focus = m.selectedApp ?? hovered
                 SectorMark(angle: .value("Value", s.joules), innerRadius: .ratio(0.62),
@@ -225,7 +225,7 @@ struct RankingChart: View {
                     .foregroundStyle(ChartPalette.color(s, at: i))
                     .opacity(focus == nil || focus == s.name ? 1 : 0.3)
             }
-            .frame(width: 160, height: 160)
+            .frame(width: 140, height: 140)
             .overlay {
                 VStack(spacing: 2) {
                     Text(m.rankKind == .memory ? L("峰值", "Peak") : L("合计", "Total")).font(.caption2).foregroundStyle(.secondary)
@@ -252,10 +252,9 @@ struct RankingChart: View {
                 Text(ChartPalette.label(s)).lineLimit(1)
                 if let v = m.parsed?.verdict(for: s.name) {
                     Image(systemName: v.verdict.icon).font(.caption).foregroundStyle(v.verdict.color)
-                    if v.verdict != .expected { Text(v.note).font(.caption).foregroundStyle(v.verdict.color).lineLimit(1) }
                 }
                 Spacer(minLength: 8)
-                Text(m.rankKind.format(s.joules, seconds: m.recordedSeconds)).foregroundStyle(.secondary)
+                Text(m.rankKind.format(s.joules, seconds: m.recordedSeconds)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
                 if m.rankKind != .memory { Text(String(format: "%.0f%%", share * 100)).frame(width: 40, alignment: .trailing) }
             }
             .font(.callout.monospacedDigit())
