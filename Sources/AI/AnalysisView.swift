@@ -107,7 +107,7 @@ struct AnalysisView: View {
         Picker("", selection: $m.rangeHours) {
             ForEach(AnalysisModel.ranges, id: \.self) { Text(AnalysisModel.rangeTitle($0)).tag($0) }
         }
-        .labelsHidden().pickerStyle(.segmented).fixedSize()
+        .labelsHidden().pickerStyle(.segmented).fixedSize().focusEffectDisabled()
     }
 
     private var actions: some View {
