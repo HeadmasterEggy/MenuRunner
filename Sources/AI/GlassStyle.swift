@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 enum GlassMetrics {
     static let cardRadius: CGFloat = 18
@@ -11,18 +10,6 @@ extension View {
     func glassCard(radius: CGFloat = GlassMetrics.cardRadius, tint: Color? = nil, interactive: Bool = false) -> some View {
         glassEffect(Glass.regular.tint(tint).interactive(interactive), in: .rect(cornerRadius: radius))
     }
-}
-
-struct WindowGlassBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView()
-        v.material = .fullScreenUI
-        v.blendingMode = .behindWindow
-        v.state = .active
-        return v
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 struct AmbientBackdrop: View {
@@ -46,15 +33,5 @@ struct AmbientBackdrop: View {
 
     private func blob(_ color: Color, size: CGFloat, x: CGFloat, y: CGFloat) -> some View {
         Circle().fill(color.opacity(strength)).frame(width: size, height: size).position(x: x, y: y)
-    }
-}
-
-struct WindowBackdrop: View {
-    var body: some View {
-        ZStack {
-            WindowGlassBackground()
-            AmbientBackdrop()
-        }
-        .ignoresSafeArea()
     }
 }

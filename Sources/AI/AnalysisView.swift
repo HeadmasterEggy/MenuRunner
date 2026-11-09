@@ -35,6 +35,7 @@ struct MarkdownText: View {
 
 struct AnalysisView: View {
     @ObservedObject var m: AnalysisModel
+    var onClose: () -> Void = {}
     @State private var showSettings = false
 
     private static let wideWidth: CGFloat = 900
@@ -81,9 +82,8 @@ struct AnalysisView: View {
             .font(.caption).foregroundStyle(.secondary)
             .padding(.horizontal, 6)
         }
-        .padding(.horizontal, 20).padding(.bottom, 14).padding(.top, 8)
-        .frame(minWidth: 640, minHeight: 640)
-        .background(WindowBackdrop())
+        .padding(16)
+        .background(AmbientBackdrop().clipShape(.rect(cornerRadius: 24)))
         .onAppear {
             if (m.apiKey.isEmpty && m.provider == .anthropic) || m.model.isEmpty {
                 DispatchQueue.main.async { showSettings = true }
@@ -130,6 +130,10 @@ struct AnalysisView: View {
                 Button(L("开始分析", "Analyze"), systemImage: "sparkles") { m.analyze() }
                     .buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
             }
+            Button { onClose() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.glass).focusEffectDisabled()
+                .accessibilityLabel(L("关闭", "Close"))
+                .keyboardShortcut("w", modifiers: .command)
         }
         .fixedSize()
     }
