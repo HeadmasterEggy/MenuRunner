@@ -9,6 +9,7 @@ final class SettingsModel: ObservableObject {
     var setLogin: (Bool) -> Bool = { $0 }
     var options: (String) -> [(id: String, name: String)] = { _ in [] }
     var openActivityMonitor: () -> Void = {}
+    var openAnalysis: () -> Void = {}
     let runnerFrames: [String: [NSImage]] = Dictionary(uniqueKeysWithValues: Runner.all.map { ($0.id, $0.frames()) })
 
     init(values: [String: String], login: Bool) { self.values = values; self.login = login }
@@ -90,6 +91,21 @@ struct SettingsView: View {
                 segmented("refreshInterval", L("刷新频率", "Refresh Rate"), "arrow.clockwise")
                 segmented("tempUnit", L("温度单位", "Temperature Unit"), "thermometer.medium")
                 menuPicker("lang", "语言 / Language", "globe")
+            }
+            Section(L("功耗", "Power")) {
+                Toggle(isOn: Binding(get: { m.values["powerRecording"] != "off" }, set: { on in
+                    m.values["powerRecording"] = on ? "on" : "off"
+                    PowerRecorder.shared.enabled = on
+                })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(L("记录功耗历史", "Record Power History"), systemImage: "bolt.fill")
+                        Text(L("后台记录各应用耗电，保留 14 天，供 AI 分析", "Records per-app energy in the background for 14 days, for AI analysis"))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Button { m.openAnalysis() } label: {
+                    Label(L("AI 系统分析…", "AI System Analysis…"), systemImage: "sparkles")
+                }
             }
             Section(L("系统", "System")) {
                 Toggle(isOn: Binding(get: { m.login }, set: { m.login = m.setLogin($0) })) {

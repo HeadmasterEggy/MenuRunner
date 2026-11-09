@@ -77,6 +77,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             (84,  [(0, W, drawMemory, { [weak self] in self?.showDetail(.memory) })]),
             (138, [(0, half, drawStorage, { [weak self] in self?.showDetail(.storage) }), (half + g, half, drawBattery, { [weak self] in self?.showDetail(.battery) })]),
             (96,  [(0, W, drawNetwork, { [weak self] in self?.showDetail(.network) })]),
+            (PowerCards.mainHeight, [(0, W, power.drawMain, { [weak self] in self?.showDetail(.power) })]),
         ], continuous: [1, 2, 7],
            button: { [weak self] card, w in
             guard let self else { return }
@@ -100,6 +101,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
 
     static let procRows = 8, topProcRows = 10
     let detail = DetailProvider()
+    let power = PowerCards()
     private var detailKind: DetailKind = .memory
     private var detailPages: [String: Page] = [:]
     private var detailTimer: Timer?
@@ -169,6 +171,12 @@ final class PanelController: NSObject, NSPopoverDelegate {
                 rows.append((CGFloat(max(1, min(14, (detail.sensors.count + 1) / 2))) * 22 + 24, [(0, W, drawSensors, nil)]))
             case .storage: rows += [(CGFloat(max(1, detail.volumes.count)) * 46 + 14, [(0, W, drawVolumes, nil)]),
                                     (12 * 30 + 46, [(0, W, drawAppSizes, nil)])]
+            case .power:
+                let listH = CGFloat(PowerCards.appRows) * 30 + 46
+                rows += [(PowerCards.summaryHeight, [(0, W, power.drawSummary, nil)]),
+                         (listH, [(0, W, { [weak self] w in self?.drawApps(w, L("当前最耗电的应用", "Top apps by power now"), Array(PowerRecorder.shared.liveApps.prefix(PowerCards.appRows)), PowerMonitor.formatWatts) }, nil)]),
+                         (listH, [(0, W, { [weak self] w in self?.drawApps(w, L("过去 24 小时耗电最多", "Most energy in the last 24 h"), PowerRecorder.shared.topApps(hours: 24, limit: PowerCards.appRows), PowerMonitor.formatEnergy) }, nil)]),
+                         (PowerCards.analysisHeight, [(0, W, power.drawAnalysis, { [weak self] in self?.openAnalysis() })])]
             case .network: rows += [(CGFloat(max(1, detail.interfaces.count)) * 40 + 40, [(0, W, drawInterfaces, nil)]), (8 * 30 + 46, [(0, W, { [weak self] w in self?.drawApps(w, L("网络流量最大的应用", "Top apps by network"), self?.detail.netApps ?? [], { NetMonitor.format($0) }) }, nil)])]
             }
             let p = makePage(rows, button: { [weak self] card, _ in
@@ -193,6 +201,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
                     }
                 default: break
                 }
+            }
+            if k == .power {
+                p.cards[2].rowAt = { [weak self] pt in self?.rowHit(pt, top: 36, paths: PowerRecorder.shared.liveApps.prefix(PowerCards.appRows).map { $0.path }) }
+                p.cards[3].rowAt = { [weak self] pt in self?.rowHit(pt, top: 36, paths: PowerRecorder.shared.topApps(hours: 24, limit: PowerCards.appRows).map { $0.path }) }
             }
             detailPages[key(k)] = p
             return p
@@ -231,6 +243,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
         case .temps:   return ("thermometer.medium", .systemOrange, L("温度传感器", "Temperature Sensors"), m.temps.soc.map { TempUnit.format($0) } ?? "--", L("\(detail.sensors.count) 个传感器", "\(detail.sensors.count) sensors"))
         case .storage: return ("internaldrive", .systemIndigo, L("存储", "Storage"), m.storage.map { Draw.pct($0.used / $0.total) } ?? "--", L("已挂载的卷", "Mounted volumes"))
         case .battery: return ("battery.100", .systemGreen, L("电池", "Battery"), m.battery.map { "\($0.percent)%" } ?? "--", m.battery.map { SystemInfo.stateText($0.state) } ?? "")
+        case .power:   return ("bolt.fill", .systemYellow, L("功耗", "Power"), PowerRecorder.shared.liveWatts.map(PowerMonitor.formatWatts) ?? "--", L("应用耗电 · 历史记录", "App energy · history"))
         case .network: return ("network", .systemTeal, L("网络", "Network"), "↓ " + NetMonitor.format(m.v("down")), "↑ " + NetMonitor.format(m.v("up")))
         }
     }
@@ -288,6 +301,11 @@ final class PanelController: NSObject, NSPopoverDelegate {
             let vs = NSAttributedString(string: "\(Int(v * 100))", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .regular), .foregroundColor: NSColor.glassTertiary])
             vs.draw(at: NSPoint(x: x + (bw - vs.size().width) / 2, y: top + h + 16))
         }
+    }
+
+    private func openAnalysis() {
+        hide()
+        AnalysisWindow.shared.show(spec: spec)
     }
 
     private func drawApps(_ w: CGFloat, _ title: String, _ apps: [AppStat], _ fmt: (Double) -> String) {

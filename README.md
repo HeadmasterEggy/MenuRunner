@@ -35,6 +35,8 @@
   - Temperatures — SoC, battery, SSD, plus fan speed on Macs with fans
   - Network upload / download speed
   - **Click any card for details** (with smooth slide / fade transitions) — app disk usage largest-first, per-core CPU and top apps by CPU, GPU utilization and top apps by GPU, memory by app, every temperature sensor and each fan with its RPM range, all volumes, full battery info (capacity, voltage, power, adapter), network interfaces and top apps by traffic, full machine spec
+- **Power usage** — a Power card shows whole-system watts and the apps drawing the most power right now; its detail page adds a 24-hour chart, the apps that used the most energy in the last 24 hours, and a link to AI analysis. MenuRunner records per-app energy and the other stats in 5-minute buckets for 14 days (turn it off under *Settings → Power*).
+- **AI power analysis** — after it has been recording for a while, *AI Analysis* sends a summary of the recorded data to Claude (your Anthropic API key) or any OpenAI-compatible endpoint (OpenAI, DeepSeek, a local Ollama, …) and shows what drains power and what to change. Keys are stored in the macOS Keychain.
 - **Settings** — refresh rate (0.5 s / 1 s / 2 s), °C / °F, English / Simplified Chinese, launch at login, open Activity Monitor.
 - **Updates** — *Check for Updates* looks at the latest GitHub Release and installs it in place; with *Automatically Update* on (the default) MenuRunner checks every 6 hours and updates itself, then relaunches.
 
@@ -78,4 +80,5 @@ MenuRunner.app/Contents/MacOS/MenuRunner --preview out.png  # export runner fram
 
 - SoC / SSD temperatures come from the system HID temperature sensors through a private IOKit API (the same approach Stats and iStat use). No root needed, but future macOS versions may change it; the panel shows `--` when unavailable.
 - Fan speed is read from the SMC (`AppleSMC`), also without root. Macs without fans, like the MacBook Air, simply don't show the fan row or menu bar option.
+- Per-app energy comes from the kernel's per-process energy counter (`proc_pid_rusage`, `ri_energy_nj`) and whole-system power from the SMC (`PSTR`) or battery telemetry. Per-app figures only count the energy of each process's own work on the chip, so they add up to less than the whole-system number, which includes the display.
 - Everything else uses public APIs: `host_statistics`, IORegistry, `getifaddrs` and IOKit power sources.
