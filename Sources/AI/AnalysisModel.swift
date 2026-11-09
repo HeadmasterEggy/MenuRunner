@@ -50,7 +50,11 @@ final class AnalysisModel: ObservableObject {
     var recordedSeconds: Double { buckets.reduce(0) { $0 + $1.seconds } }
     var ranking: [EnergyShare] { PowerStats.ranking(buckets, kind: rankKind, limit: Self.shareLimit) }
     var energyRanking: [EnergyShare] { PowerStats.ranking(buckets, kind: .energy, limit: Self.shareLimit) }
-    var trend: [TrendPoint] { PowerStats.trend(buckets, metric: metric, step: PowerStats.step(hours: rangeHours), app: selectedApp, cores: cores) }
+    var step: TimeInterval {
+        guard let first = buckets.map(\.start).min(), let last = buckets.map(\.end).max() else { return PowerStats.step(hours: rangeHours) }
+        return PowerStats.step(hours: min(rangeHours, Int(ceil(last.timeIntervalSince(first) / 3600))))
+    }
+    var trend: [TrendPoint] { PowerStats.trend(buckets, metric: metric, step: step, app: selectedApp, cores: cores) }
     var daily: [DailyEnergy] { PowerStats.daily(buckets) }
     var availableMetrics: [Metric] { Metric.allCases.filter { PowerStats.average(buckets, metric: $0) != nil } }
 
