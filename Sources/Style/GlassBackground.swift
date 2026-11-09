@@ -27,6 +27,7 @@ enum GlassBackground {
             let glass = NSGlassEffectView(frame: frame)
             glass.cornerRadius = cornerRadius
             glass.style = .regular
+            glass.autoresizingMask = [.width, .height]
             glass.contentView = content
             return glass
         }
@@ -38,6 +39,7 @@ enum GlassBackground {
         material.layer?.cornerRadius = cornerRadius
         material.layer?.cornerCurve = .continuous
         material.layer?.masksToBounds = true
+        material.autoresizingMask = [.width, .height]
         content.frame = material.bounds
         content.autoresizingMask = [.width, .height]
         material.addSubview(content)
