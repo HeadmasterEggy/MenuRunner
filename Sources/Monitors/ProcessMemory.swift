@@ -45,13 +45,35 @@ enum ProcessMemory {
         return d >= 1_073_741_824 ? String(format: "%.2f GB", d / 1_073_741_824) : String(format: "%.0f MB", d / 1_048_576)
     }
 
-    private static var iconCache: [String: NSImage] = [:]
+    private static let iconSide: CGFloat = 32
+    private static let iconCache: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = 96
+        return c
+    }()
+    private static let placeholder = NSImage(systemSymbolName: "gearshape.2", accessibilityDescription: nil)!
+
     static func icon(_ path: String?) -> NSImage {
-        let key = path ?? ""
-        if let i = iconCache[key] { return i }
-        let img = path.map { NSWorkspace.shared.icon(forFile: $0) }
-            ?? NSImage(systemSymbolName: "gearshape.2", accessibilityDescription: nil)!
-        iconCache[key] = img
+        guard let path else { return placeholder }
+        if let i = iconCache.object(forKey: path as NSString) { return i }
+        let img = rasterize(NSWorkspace.shared.icon(forFile: path))
+        iconCache.setObject(img, forKey: path as NSString)
+        return img
+    }
+
+    private static func rasterize(_ source: NSImage) -> NSImage {
+        let size = NSSize(width: iconSide, height: iconSide)
+        let pixels = Int(iconSide * 2)
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
+                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return source }
+        rep.size = size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        source.draw(in: NSRect(origin: .zero, size: size), from: .zero, operation: .copy, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        let img = NSImage(size: size)
+        img.addRepresentation(rep)
         return img
     }
 }

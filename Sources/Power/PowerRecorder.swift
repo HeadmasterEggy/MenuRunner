@@ -21,6 +21,7 @@ final class PowerRecorder {
     private var timer: Timer?
     private var active = false
     private var reading = false
+    private var names = NameTable()
     private let saveQueue = DispatchQueue(label: "menurunner.power.save", qos: .utility)
 
     private let fileURL: URL = {
@@ -113,7 +114,7 @@ final class PowerRecorder {
     private func commit() {
         guard let b = current.bucket(appLimit: Self.appsPerBucket) else { return }
         current = PowerAccumulator(start: Date())
-        buckets.append(b)
+        buckets.append(names.intern(b))
         let cutoff = Date().addingTimeInterval(-Self.retention)
         buckets.removeAll { $0.start < cutoff }
         save()
@@ -122,32 +123,50 @@ final class PowerRecorder {
     private func save() {
         let snapshot = buckets, url = fileURL
         saveQueue.async {
-            guard let data = try? JSONEncoder().encode(snapshot) else { return }
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: url, options: .atomic)
+            autoreleasepool {
+                guard let data = try? JSONEncoder().encode(snapshot) else { return }
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? data.write(to: url, options: .atomic)
+            }
         }
     }
 
     func waitForSave() { saveQueue.sync {} }
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL), let saved = try? JSONDecoder().decode([PowerBucket].self, from: data) else { return }
+        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe), let saved = try? JSONDecoder().decode([PowerBucket].self, from: data) else { return }
         let cutoff = Date().addingTimeInterval(-Self.retention)
-        buckets = saved.filter { $0.start >= cutoff }
+        buckets = saved.filter { $0.start >= cutoff }.map { names.intern($0) }
+    }
+
+    private func window(hours: Double) -> ArraySlice<PowerBucket> {
+        let cutoff = Date().addingTimeInterval(-hours * 3600)
+        var lo = buckets.startIndex, hi = buckets.endIndex
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if buckets[mid].end >= cutoff { hi = mid } else { lo = mid + 1 }
+        }
+        return buckets[lo...]
+    }
+
+    private func forEachRecent(hours: Double, appLimit: Int = PowerRecorder.appsPerBucket, _ body: (PowerBucket) -> Void) {
+        window(hours: hours).forEach(body)
+        if let partial = current.bucket(appLimit: appLimit) { body(partial) }
     }
 
     func recent(hours: Double) -> [PowerBucket] {
-        let cutoff = Date().addingTimeInterval(-hours * 3600)
-        var list = buckets.filter { $0.end >= cutoff }
+        var list = Array(window(hours: hours))
         if let partial = current.bucket(appLimit: Self.appsPerReading) { list.append(partial) }
         return list
     }
 
-    func recordedSeconds(hours: Double) -> Double { recent(hours: hours).reduce(0) { $0 + $1.seconds } }
+    func recordedSeconds(hours: Double) -> Double {
+        window(hours: hours).reduce(current.seconds) { $0 + $1.seconds }
+    }
 
     func topApps(hours: Double, limit: Int) -> [AppStat] {
         var totals: [String: AppStat] = [:]
-        for b in recent(hours: hours) {
+        forEachRecent(hours: hours, appLimit: Self.appsPerReading) { b in
             for a in b.apps {
                 let key = a.path ?? a.name
                 var s = totals[key] ?? AppStat(name: a.name, path: a.path, value: 0, processes: 1)
@@ -159,22 +178,28 @@ final class PowerRecorder {
     }
 
     func systemEnergy(hours: Double) -> Double {
-        recent(hours: hours).reduce(0) { $0 + ($1.systemWatts ?? 0) * $1.seconds }
+        var total = 0.0
+        forEachRecent(hours: hours) { total += ($0.systemWatts ?? 0) * $0.seconds }
+        return total
     }
 
     func averageWatts(hours: Double) -> Double? {
-        let list = recent(hours: hours).filter { $0.systemWatts != nil }
-        let seconds = list.reduce(0) { $0 + $1.seconds }
-        return seconds > 0 ? list.reduce(0) { $0 + ($1.systemWatts ?? 0) * $1.seconds } / seconds : nil
+        var joules = 0.0, seconds = 0.0
+        forEachRecent(hours: hours) { b in
+            guard let w = b.systemWatts else { return }
+            joules += w * b.seconds
+            seconds += b.seconds
+        }
+        return seconds > 0 ? joules / seconds : nil
     }
 
     func hourlyWatts(hours: Int) -> [Double?] {
         let now = Date()
         var sums = [Double](repeating: 0, count: hours), weights = [Double](repeating: 0, count: hours)
-        for b in recent(hours: Double(hours)) {
-            guard let w = b.systemWatts else { continue }
+        forEachRecent(hours: Double(hours)) { b in
+            guard let w = b.systemWatts else { return }
             let age = Int(now.timeIntervalSince(b.start) / 3600)
-            guard age >= 0, age < hours else { continue }
+            guard age >= 0, age < hours else { return }
             let i = hours - 1 - age
             sums[i] += w * b.seconds
             weights[i] += b.seconds
