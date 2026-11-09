@@ -10,7 +10,7 @@
 [![简体中文](https://img.shields.io/badge/语言-简体中文-E5484D?style=for-the-badge)](README.zh-CN.md)
 
 [![Release](https://img.shields.io/github/v/release/HeadmasterEggy/MenuRunner?style=flat-square)](https://github.com/HeadmasterEggy/MenuRunner/releases/latest)
-![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple)
+![macOS](https://img.shields.io/badge/macOS-14%2B-black?style=flat-square&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-555?style=flat-square)
 
 <img src="docs/panel.png" width="260" alt="Panel">&nbsp;&nbsp;<img src="docs/cpu.png" width="260" alt="CPU details">&nbsp;&nbsp;<img src="docs/memory.png" width="260" alt="Memory usage by app">
@@ -52,7 +52,7 @@ Left-click the menu bar icon to open the panel; right-click it (or use the gear 
 
 ## Build from source
 
-Requires macOS 26+ on Apple Silicon and the Xcode Command Line Tools.
+Runs on macOS 14 Sonoma or later on Apple Silicon. Liquid Glass is used on macOS 26 and later; older versions get a translucent material look instead. Building needs the Xcode Command Line Tools.
 
 ```sh
 ./build.sh      # compile, ad-hoc sign, install to ~/Applications

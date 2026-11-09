@@ -14,6 +14,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
     static let width: CGFloat = 340, gap: CGFloat = 10, margin: CGFloat = 10
     private static let fanRowHeight: CGFloat = 25
     private static let titleBadgeWidth: CGFloat = 12
+    private static let cardCornerRadius: CGFloat = 18
     private let showsFans = FanMonitor.shared.hasFans
     private var gpuTempsHeight: CGFloat { 118 + (showsFans ? Self.fanRowHeight : 0) }
 
@@ -43,17 +44,12 @@ final class PanelController: NSObject, NSPopoverDelegate {
         let H = y - g
         let size = NSSize(width: W + M * 2, height: H + M * 2)
         let root = NSView(frame: NSRect(origin: .zero, size: size))
-        let container = NSGlassEffectContainerView(frame: root.bounds)
-        container.spacing = g
         let glassHolder = NSView(frame: root.bounds)
         let contentLayer = NSView(frame: root.bounds)
         var cards: [CardView] = []
         for (i, (x, top, w, h, d, click)) in layout.enumerated() {
             let frame = NSRect(x: M + x, y: M + H - top - h, width: w, height: h)
-            let glass = NSGlassEffectView(frame: frame)
-            glass.cornerRadius = 18
-            glass.style = .regular
-            glassHolder.addSubview(glass)
+            glassHolder.addSubview(GlassBackground.card(frame: frame, cornerRadius: Self.cardCornerRadius))
             let card = CardView(frame: frame)
             card.drawer = d
             card.onClick = click
@@ -62,8 +58,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
             cards.append(card)
             if i == 0 { button?(card, w) }
         }
-        container.contentView = glassHolder
-        root.addSubview(container)
+        root.addSubview(GlassBackground.group(frame: root.bounds, spacing: g, content: glassHolder))
         root.addSubview(contentLayer)
         return Page(view: root, size: size, cards: cards)
     }

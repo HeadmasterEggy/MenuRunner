@@ -10,7 +10,7 @@
 [![简体中文](https://img.shields.io/badge/语言-简体中文-E5484D?style=for-the-badge)](README.zh-CN.md)
 
 [![Release](https://img.shields.io/github/v/release/HeadmasterEggy/MenuRunner?style=flat-square)](https://github.com/HeadmasterEggy/MenuRunner/releases/latest)
-![macOS](https://img.shields.io/badge/macOS-26%2B-black?style=flat-square&logo=apple)
+![macOS](https://img.shields.io/badge/macOS-14%2B-black?style=flat-square&logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-555?style=flat-square)
 
 <img src="docs/zh/panel.png" width="260" alt="面板">&nbsp;&nbsp;<img src="docs/zh/cpu.png" width="260" alt="CPU 详情">&nbsp;&nbsp;<img src="docs/zh/memory.png" width="260" alt="按应用查看内存">
@@ -52,7 +52,7 @@
 
 ## 从源码构建
 
-需要 Apple 芯片、macOS 26 以上，以及 Xcode 命令行工具。
+支持 Apple 芯片、macOS 14 Sonoma 及以上。macOS 26 及以上使用液态玻璃效果，更早的系统改用半透明材质。编译需要 Xcode 命令行工具。
 
 ```sh
 ./build.sh      # 编译、本地签名、安装到 ~/Applications
