@@ -85,7 +85,8 @@ struct TrendChart: View {
         let start = Date(timeIntervalSince1970: floor(r.lowerBound.timeIntervalSince1970 / step) * step)
         let end = max(r.upperBound, start.addingTimeInterval(step))
         guard let first = points.first?.time, let last = points.last?.time, first < last else { return start...end }
-        let lo = min(max(start, first), last), hi = max(min(end, last), lo)
+        let hi = min(max(end, first), last)
+        let lo = min(max(start, first), max(hi.addingTimeInterval(-step), first))
         return lo...hi
     }
 
