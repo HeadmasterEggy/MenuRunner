@@ -7,8 +7,38 @@ enum GlassMetrics {
 }
 
 extension View {
-    func glassCard(radius: CGFloat = GlassMetrics.cardRadius, tint: Color? = nil, interactive: Bool = false) -> some View {
-        glassEffect(Glass.regular.tint(tint).interactive(interactive), in: .rect(cornerRadius: radius))
+    @ViewBuilder func glassCard(radius: CGFloat = GlassMetrics.cardRadius, tint: Color? = nil, interactive: Bool = false) -> some View {
+        if #available(macOS 26, *) {
+            glassEffect(Glass.regular.tint(tint).interactive(interactive), in: .rect(cornerRadius: radius))
+        } else {
+            background {
+                RoundedRectangle(cornerRadius: radius, style: .continuous).fill(.regularMaterial)
+                    .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(tint ?? .clear))
+                    .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+            }
+        }
+    }
+
+    @ViewBuilder func glassButton(prominent: Bool = false) -> some View {
+        if #available(macOS 26, *) {
+            if prominent { buttonStyle(.glassProminent) } else { buttonStyle(.glass) }
+        } else {
+            if prominent { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered) }
+        }
+    }
+}
+
+struct GlassGroup<Content: View>: View {
+    var spacing: CGFloat = GlassMetrics.spacing
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            GlassEffectContainer(spacing: spacing) { content }
+        } else {
+            content
+        }
     }
 }
 

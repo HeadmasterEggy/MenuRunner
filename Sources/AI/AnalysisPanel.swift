@@ -80,15 +80,34 @@ final class AnalysisPanel: NSObject {
         p.isReleasedWhenClosed = false
         p.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary, .moveToActiveSpace]
         p.onEscape = { [weak self] in self?.onClose() }
-        let glass = NSGlassEffectView(frame: p.contentLayoutRect)
-        glass.cornerRadius = Self.cornerRadius
-        glass.style = .regular
-        glass.autoresizingMask = [.width, .height]
         let host = NSHostingView(rootView: AnalysisView(m: model, onClose: { [weak self] in self?.onClose() }))
         host.sizingOptions = []
-        glass.contentView = host
-        p.contentView = glass
+        p.contentView = Self.background(host, frame: p.contentLayoutRect)
         return p
+    }
+
+    private static func background(_ host: NSView, frame: NSRect) -> NSView {
+        if #available(macOS 26, *) {
+            let glass = NSGlassEffectView(frame: frame)
+            glass.cornerRadius = cornerRadius
+            glass.style = .regular
+            glass.autoresizingMask = [.width, .height]
+            glass.contentView = host
+            return glass
+        }
+        let blur = NSVisualEffectView(frame: frame)
+        blur.material = .popover
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.wantsLayer = true
+        blur.layer?.cornerRadius = cornerRadius
+        blur.layer?.cornerCurve = .continuous
+        blur.layer?.masksToBounds = true
+        blur.autoresizingMask = [.width, .height]
+        host.frame = blur.bounds
+        host.autoresizingMask = [.width, .height]
+        blur.addSubview(host)
+        return blur
     }
 
     private func installEditMenu() {

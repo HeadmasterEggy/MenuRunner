@@ -64,7 +64,7 @@ struct AnalysisView: View {
             if let e = m.error { Text(e).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
             GeometryReader { g in
                 ScrollView {
-                    GlassEffectContainer(spacing: GlassMetrics.spacing) {
+                    GlassGroup {
                         content(wide: g.size.width >= Self.wideWidth)
                             .padding(.vertical, 4)
                             .padding(.horizontal, 2)
@@ -113,25 +113,25 @@ struct AnalysisView: View {
     private var actions: some View {
         HStack(spacing: 8) {
             Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }
-                .buttonStyle(.glass)
+                .glassButton()
                 .focusEffectDisabled()
                 .accessibilityLabel(L("AI 服务设置", "AI service settings"))
                 .help(L("AI 服务设置", "AI service settings"))
                 .popover(isPresented: $showSettings, arrowEdge: .bottom) { settings.padding(16).frame(width: 440) }
             if m.running {
                 ProgressView().controlSize(.small)
-                Button(L("取消", "Cancel")) { m.cancel() }.buttonStyle(.glass)
+                Button(L("取消", "Cancel")) { m.cancel() }.glassButton()
             } else {
                 if !m.result.isEmpty {
                     Button { m.copyResult() } label: { Image(systemName: "doc.on.doc") }
-                        .buttonStyle(.glass).focusEffectDisabled()
+                        .glassButton().focusEffectDisabled()
                         .accessibilityLabel(L("复制分析结果", "Copy the analysis")).help(L("复制分析结果", "Copy the analysis"))
                 }
                 Button(L("开始分析", "Analyze"), systemImage: "sparkles") { m.analyze() }
-                    .buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
+                    .glassButton(prominent: true).keyboardShortcut(.defaultAction)
             }
             Button { onClose() } label: { Image(systemName: "xmark") }
-                .buttonStyle(.glass).focusEffectDisabled()
+                .glassButton().focusEffectDisabled()
                 .accessibilityLabel(L("关闭", "Close"))
                 .keyboardShortcut("w", modifiers: .command)
         }
@@ -184,7 +184,7 @@ struct AnalysisView: View {
                 Button { withAnimation(.snappy) { m.selectedApp = nil } } label: {
                     Label(app, systemImage: "xmark.circle.fill").font(.caption)
                 }
-                .buttonStyle(.glass).controlSize(.small).tint(ChartPalette.app)
+                .glassButton().controlSize(.small).tint(ChartPalette.app)
             }
         } content: {
             if m.trend.count >= 2 { TrendChart(m: m) } else {
