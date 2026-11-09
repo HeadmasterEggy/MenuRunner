@@ -46,7 +46,7 @@ struct AnalysisView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label(L("AI 功耗分析", "AI Power Analysis"), systemImage: "sparkles").font(.title3.weight(.semibold))
+                Label(L("AI 系统分析", "AI System Analysis"), systemImage: "sparkles").font(.title3.weight(.semibold))
                 Spacer()
                 Text(L("已记录 ", "Recorded ") + AnalysisModel.spanText(m.recordedHours)).font(.callout).foregroundStyle(.secondary)
             }
@@ -88,18 +88,42 @@ struct AnalysisView: View {
         .onAppear { showSettings = (m.apiKey.isEmpty && m.provider == .anthropic) || m.model.isEmpty }
     }
 
+    private var stepText: String {
+        let minutes = Int(PowerStats.step(hours: m.rangeHours) / 60)
+        return minutes < 60 ? L("每 \(minutes) 分钟", "per \(minutes) min") : L("每 \(minutes / 60) 小时", "per \(minutes / 60) h")
+    }
+
     @ViewBuilder private var dataSection: some View {
-        if m.shares.isEmpty && m.trend.isEmpty {
+        if m.buckets.isEmpty {
             ChartCard(title: L("数据", "Data"), icon: "chart.bar") {
                 Text(L("还没有记录到数据。MenuRunner 每 5 分钟存一次，过一会儿再来看。", "Nothing recorded yet. MenuRunner saves every 5 minutes; check back soon."))
                     .foregroundStyle(.secondary)
             }
         } else {
-            if !m.shares.isEmpty {
-                ChartCard(title: L("应用耗电占比", "Energy by app"), icon: "chart.pie.fill") { EnergyShareChart(shares: m.shares) }
+            MetricTiles(m: m)
+            ChartCard(title: m.metric.title + L("趋势（", " trend (") + stepText + L("）", ")"), icon: "chart.xyaxis.line") {
+                if let app = m.selectedApp {
+                    Button { withAnimation(.snappy) { m.selectedApp = nil } } label: {
+                        Label(app, systemImage: "xmark.circle.fill").font(.caption)
+                    }
+                    .buttonStyle(.bordered).controlSize(.small).tint(ChartPalette.app)
+                }
+            } content: {
+                if m.trend.count >= 2 { TrendChart(m: m) } else {
+                    Text(L("数据点太少，多记录一会儿再看趋势。", "Not enough points yet for a trend.")).foregroundStyle(.secondary)
+                }
+                if m.selectedApp != nil && !(m.metric == .power || m.metric == .cpu || m.metric == .memory) {
+                    Text(L("这个指标没有按应用的数据，切到功耗、CPU 或内存可以看所选应用的曲线。", "This metric has no per-app data; switch to Power, CPU or Memory to see the selected app."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-            if m.trend.count >= 2 {
-                ChartCard(title: L("整机功耗趋势（每小时平均）", "System power (hourly average)"), icon: "chart.xyaxis.line") { PowerTrendChart(points: m.trend) }
+            ChartCard(title: L("应用排行", "Top apps"), icon: "chart.pie.fill") {
+                Picker("", selection: $m.rankKind) {
+                    ForEach(RankKind.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden().pickerStyle(.segmented).fixedSize()
+            } content: {
+                RankingChart(m: m)
             }
             if m.daily.count >= 2 {
                 ChartCard(title: L("每天耗电", "Energy per day"), icon: "chart.bar.fill") { DailyEnergyChart(days: m.daily) }
@@ -109,7 +133,7 @@ struct AnalysisView: View {
 
     @ViewBuilder private var aiSection: some View {
         if let r = m.parsed {
-            AnalysisResultView(result: r, shares: m.shares)
+            AnalysisResultView(result: r, m: m)
         } else if !m.result.isEmpty {
             ChartCard(title: L("AI 分析", "AI analysis"), icon: "sparkles") { MarkdownText(text: m.result) }
         } else {

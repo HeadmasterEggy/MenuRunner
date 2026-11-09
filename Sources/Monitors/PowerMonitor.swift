@@ -5,39 +5,48 @@ import QuartzCore
 struct PowerReading {
     var system: Double?
     var perPid: [pid_t: Double]
+    var cpuPerPid: [pid_t: Double]
+    var memoryPerPid: [pid_t: Double]
     var interval: Double
 }
 
+private struct ProcessUsage { var energy: UInt64, cpuTime: UInt64, footprint: UInt64 }
+
 final class PowerMonitor {
     private static let nanojoulesPerJoule = 1e9
+    private static let nanosPerSecond = 1e9
     private static let milliPerUnit = 1000.0
     private static let microPerUnit = 1_000_000.0
     private static let plausibleWatts = 0.05...2000
 
-    private var prevEnergy: [pid_t: UInt64] = [:]
+    private var prev: [pid_t: ProcessUsage] = [:]
     private var prevTime: CFTimeInterval = 0
+    private let nanosPerTick: Double = { var tb = mach_timebase_info(); mach_timebase_info(&tb); return Double(tb.numer) / Double(tb.denom) }()
 
     func read() -> PowerReading? {
         let now = CACurrentMediaTime()
         let dt = now - prevTime
-        var cur: [pid_t: UInt64] = [:], watts: [pid_t: Double] = [:]
+        var cur: [pid_t: ProcessUsage] = [:], watts: [pid_t: Double] = [:], cores: [pid_t: Double] = [:], memory: [pid_t: Double] = [:]
         for pid in AppIdentity.allPids() {
-            guard let e = Self.energy(pid) else { continue }
-            cur[pid] = e
-            if let p = prevEnergy[pid], e > p, dt > 0 { watts[pid] = Double(e - p) / Self.nanojoulesPerJoule / dt }
+            guard let u = Self.usage(pid) else { continue }
+            cur[pid] = u
+            memory[pid] = Double(u.footprint)
+            guard let p = prev[pid], dt > 0 else { continue }
+            if u.energy > p.energy { watts[pid] = Double(u.energy - p.energy) / Self.nanojoulesPerJoule / dt }
+            if u.cpuTime > p.cpuTime { cores[pid] = Double(u.cpuTime - p.cpuTime) * nanosPerTick / Self.nanosPerSecond / dt }
         }
-        let first = prevEnergy.isEmpty
-        prevEnergy = cur
+        let first = prev.isEmpty
+        prev = cur
         prevTime = now
-        return first ? nil : PowerReading(system: Self.systemWatts(), perPid: watts, interval: dt)
+        return first ? nil : PowerReading(system: Self.systemWatts(), perPid: watts, cpuPerPid: cores, memoryPerPid: memory, interval: dt)
     }
 
-    static func energy(_ pid: pid_t) -> UInt64? {
+    private static func usage(_ pid: pid_t) -> ProcessUsage? {
         var u = rusage_info_current()
         let r = withUnsafeMutablePointer(to: &u) {
             $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, $0) }
         }
-        return r == 0 ? u.ri_energy_nj : nil
+        return r == 0 ? ProcessUsage(energy: u.ri_energy_nj, cpuTime: u.ri_user_time + u.ri_system_time, footprint: u.ri_phys_footprint) : nil
     }
 
     static func systemWatts() -> Double? {

@@ -25,6 +25,7 @@ struct Finding: Codable, Identifiable {
     var title: String
     var detail: String
     var severity: Level
+    var category: String?
     var id: String { title + detail }
 }
 
@@ -70,12 +71,12 @@ struct AnalysisResult: Codable {
     static var schemaPrompt: String {
         """
         Reply with one JSON object and nothing else, no code fences. Shape:
-        {"score": 0-100 integer for how energy-efficient this Mac's usage looks (100 = nothing to improve),
+        {"score": 0-100 integer for how healthy and efficient this Mac's usage looks (100 = nothing to improve),
          "headline": "one sentence summary",
-         "findings": [{"title": "short", "detail": "one or two sentences citing numbers", "severity": "high|medium|low"}],
+         "findings": [{"title": "short", "detail": "one or two sentences citing numbers", "severity": "high|medium|low", "category": "power|cpu|gpu|memory|thermal|battery|network"}],
          "suggestions": [{"title": "short action", "detail": "why and how, one or two sentences", "impact": "high|medium|low"}],
          "apps": [{"name": "app name exactly as in the data", "verdict": "expected|watch|abnormal", "note": "one short sentence"}]}
-        Give 2-6 findings, 3-6 suggestions, and a verdict for each of the top apps by energy (at most 8).
+        Give 3-8 findings spread over the categories the data supports, 3-6 suggestions, and a verdict for each of the top apps by energy (at most 8).
         """
     }
 }

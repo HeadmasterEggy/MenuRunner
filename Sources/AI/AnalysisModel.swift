@@ -2,7 +2,7 @@ import AppKit
 
 final class AnalysisModel: ObservableObject {
     static let ranges = [24, 72, 168, 336]
-    static let shareLimit = 6
+    static let shareLimit = 7
 
     @Published var provider: AIProvider { didSet { defaults.set(provider.rawValue, forKey: "aiProvider"); loadKey() } }
     @Published var claudeModel: String { didSet { defaults.set(claudeModel, forKey: "aiClaudeModel") } }
@@ -13,9 +13,10 @@ final class AnalysisModel: ObservableObject {
     @Published var running = false
     @Published var result: String { didSet { parsed = AnalysisResult.parse(result) } }
     @Published var parsed: AnalysisResult?
-    @Published var shares: [EnergyShare] = []
-    @Published var trend: [TrendPoint] = []
-    @Published var daily: [DailyEnergy] = []
+    @Published var buckets: [PowerBucket] = []
+    @Published var metric: Metric = .power
+    @Published var rankKind: RankKind = .energy
+    @Published var selectedApp: String?
     @Published var resultDate: Date?
     @Published var error: String?
     @Published var recordedHours = 0.0
@@ -40,13 +41,21 @@ final class AnalysisModel: ObservableObject {
 
     func refresh() {
         recordedHours = PowerRecorder.shared.recordedSeconds(hours: Double(PowerRecorder.retention / 3600)) / 3600
-        let buckets = PowerRecorder.shared.recent(hours: Double(rangeHours))
-        shares = PowerStats.shares(buckets, limit: Self.shareLimit)
-        trend = PowerStats.hourlyTrend(buckets)
-        daily = PowerStats.daily(buckets)
+        buckets = PowerRecorder.shared.recent(hours: Double(rangeHours))
     }
 
-    var totalShareJoules: Double { shares.reduce(0) { $0 + $1.joules } }
+    var cores: Int { max(spec.pCores + spec.eCores, 1) }
+    var recordedSeconds: Double { buckets.reduce(0) { $0 + $1.seconds } }
+    var ranking: [EnergyShare] { PowerStats.ranking(buckets, kind: rankKind, limit: Self.shareLimit) }
+    var energyRanking: [EnergyShare] { PowerStats.ranking(buckets, kind: .energy, limit: Self.shareLimit) }
+    var trend: [TrendPoint] { PowerStats.trend(buckets, metric: metric, step: PowerStats.step(hours: rangeHours), app: selectedApp, cores: cores) }
+    var daily: [DailyEnergy] { PowerStats.daily(buckets) }
+    var availableMetrics: [Metric] { Metric.allCases.filter { PowerStats.average(buckets, metric: $0) != nil } }
+
+    func toggle(app: String) {
+        guard app != PowerStats.otherName else { return }
+        selectedApp = selectedApp == app ? nil : app
+    }
 
     private func loadKey() { apiKey = APIKeyStore.load(provider.rawValue) }
 

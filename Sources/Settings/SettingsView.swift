@@ -104,7 +104,7 @@ struct SettingsView: View {
                     }
                 }
                 Button { m.openAnalysis() } label: {
-                    Label(L("AI 功耗分析…", "AI Power Analysis…"), systemImage: "sparkles")
+                    Label(L("AI 系统分析…", "AI System Analysis…"), systemImage: "sparkles")
                 }
             }
             Section(L("系统", "System")) {

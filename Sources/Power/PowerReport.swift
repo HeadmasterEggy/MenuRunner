@@ -4,16 +4,18 @@ enum PowerReport {
     private static let secondsPerHour = 3600.0
     private static let topAppCount = 20
     private static let hourlyAppCount = 3
+    private static let bytesPerMB = 1_048_576.0
 
     static var systemPrompt: String {
         let language = Lang.isZh ? "Write every text value in Simplified Chinese." : "Write every text value in English."
         return """
-        You analyze energy and performance data recorded on a Mac by MenuRunner, a menu bar system monitor. \
-        The user wants to understand what drains power on their Mac and what they can change. \
+        You analyze power and performance data recorded on a Mac by MenuRunner, a menu bar system monitor. \
+        The user wants to understand how their Mac is used and behaves: what drains power, what keeps the CPU and GPU busy, \
+        memory pressure, temperatures and fans, battery use and network activity, and what they can change. \
         Ground every claim in the numbers you are given and say when the data is too thin to conclude something. \
-        Cover: which apps use the most energy and whether that looks expected for what they are; \
+        Cover: which apps use the most energy, CPU and memory and whether that looks expected for what they are; \
         patterns over time such as time of day, idle periods with high draw, battery versus AC; \
-        how power relates to CPU, GPU, temperature and fan speed; anything that looks abnormal; \
+        how power relates to CPU, GPU, temperature and fan speed; memory pressure; network use; anything that looks abnormal; \
         and a short list of concrete, practical suggestions ordered by expected impact. \
         Per-app figures come from the kernel's per-process energy counters, so they are estimates that do not add up to the whole-system figure. \
         \(language)
@@ -55,25 +57,44 @@ enum PowerReport {
         }
         out.append(String(format: "Average CPU %.0f%%, GPU %.0f%%, memory used %.0f%%", avg(\.cpu) * 100, avg(\.gpu) * 100, avg(\.memory) * 100))
         if let maxTemp { out.append(String(format: "Highest SoC temperature %.0f °C", maxTemp)) }
+        if let t = PowerStats.average(buckets, metric: .batteryTemp) { out.append(String(format: "Highest battery temperature %.1f °C", t)) }
+        if let t = buckets.compactMap(\.ssdTemp).max() { out.append(String(format: "Highest SSD temperature %.0f °C", t)) }
+        if let p = PowerStats.average(buckets, metric: .pressure) {
+            let elevated = buckets.filter { ($0.pressure ?? 0) >= 1.5 }.reduce(0) { $0 + $1.seconds }
+            out.append(String(format: "Memory pressure level average %.2f (1 normal, 2 warning, 4 critical), elevated for %.0f%% of recorded time", p, recorded > 0 ? elevated / recorded * 100 : 0))
+        }
+        if let fan = PowerStats.average(buckets, metric: .fan) {
+            out.append(String(format: "Fan average %.0f RPM, max 5-minute average %.0f RPM", fan, buckets.compactMap(\.fanRpm).max() ?? 0))
+        }
+        let down = buckets.reduce(0) { $0 + ($1.netDown ?? 0) * $1.seconds }, up = buckets.reduce(0) { $0 + ($1.netUp ?? 0) * $1.seconds }
+        if down + up > 0 { out.append(String(format: "Network transferred: %.0f MB down, %.0f MB up", down / bytesPerMB, up / bytesPerMB)) }
         if recorded > 0 { out.append(String(format: "Time on battery: %.0f%% of recorded time", onBattery / recorded * 100)) }
         return out
     }
 
     private static func topApps(_ buckets: [PowerBucket], recorded: Double) -> [String] {
-        var totals: [String: (joules: Double, active: Double)] = [:]
+        var totals: [String: (joules: Double, cpu: Double, memory: Double, active: Double)] = [:]
         for b in buckets {
             for a in b.apps {
-                var t = totals[a.name] ?? (0, 0)
+                var t = totals[a.name] ?? (0, 0, 0, 0)
                 t.joules += a.joules
+                t.cpu += a.cpuSeconds ?? 0
+                t.memory = max(t.memory, a.peakMemory ?? 0)
                 t.active += b.seconds
                 totals[a.name] = t
             }
         }
         let all = totals.values.reduce(0) { $0 + $1.joules }
-        var out = ["# Apps by energy (name, Wh, average W over recorded time, share of per-app total, hours seen using energy)"]
-        for (name, t) in totals.sorted(by: { $0.value.joules > $1.value.joules }).prefix(topAppCount) {
-            out.append(String(format: "%@, %.2f Wh, %.2f W, %.0f%%, %.1f h", name, t.joules / secondsPerHour,
-                              recorded > 0 ? t.joules / recorded : 0, all > 0 ? t.joules / all * 100 : 0, t.active / secondsPerHour))
+        var out = ["# Apps (name, energy Wh, average W over recorded time, share of per-app energy, average CPU as % of one core, peak memory MB, hours seen)"]
+        let byEnergy = totals.sorted { $0.value.joules > $1.value.joules }.prefix(topAppCount).map(\.key)
+        let byCPU = totals.sorted { $0.value.cpu > $1.value.cpu }.prefix(hourlyAppCount * 2).map(\.key)
+        let byMemory = totals.sorted { $0.value.memory > $1.value.memory }.prefix(hourlyAppCount * 2).map(\.key)
+        var seen = Set<String>()
+        for name in byEnergy + byCPU + byMemory where seen.insert(name).inserted {
+            guard let t = totals[name] else { continue }
+            out.append(String(format: "%@, %.2f Wh, %.2f W, %.0f%%, %.0f%%, %.0f MB, %.1f h", name, t.joules / secondsPerHour,
+                              recorded > 0 ? t.joules / recorded : 0, all > 0 ? t.joules / all * 100 : 0,
+                              recorded > 0 ? t.cpu / recorded * 100 : 0, t.memory / bytesPerMB, t.active / secondsPerHour))
         }
         return out
     }
@@ -81,7 +102,7 @@ enum PowerReport {
     private static func hourly(_ buckets: [PowerBucket]) -> [String] {
         let cal = Calendar.current
         let groups = Dictionary(grouping: buckets) { cal.dateInterval(of: .hour, for: $0.start)?.start ?? $0.start }
-        var out = ["# Hourly (hour, recorded min, system W, CPU %, GPU %, memory %, SoC °C avg/max, fan RPM, battery %, power source, top apps W)"]
+        var out = ["# Hourly (hour, recorded min, system W, CPU %, GPU %, memory %, memory pressure, SoC °C avg/max, battery °C, fan RPM, download KB/s, upload KB/s, battery %, power source, top apps W)"]
         for hour in groups.keys.sorted() {
             guard let list = groups[hour] else { continue }
             let secs = list.reduce(0) { $0 + $1.seconds }
@@ -99,7 +120,8 @@ enum PowerReport {
             let battery = list.last?.battery.map(String.init) ?? "-"
             let temps = avg { $0.socTemp } + "/" + (list.compactMap(\.socTempMax).max().map { String(format: "%.0f", $0) } ?? "-")
             out.append([stamp(hour), String(format: "%.0f", secs / 60), avg { $0.systemWatts }, avg { $0.cpu * 100 }, avg { $0.gpu * 100 },
-                        avg { $0.memory * 100 }, temps, avg { $0.fanRpm }, battery, source, top].joined(separator: ", "))
+                        avg { $0.memory * 100 }, avg { $0.pressure }, temps, avg { $0.batteryTemp }, avg { $0.fanRpm },
+                        avg { $0.netDown.map { $0 / 1024 } }, avg { $0.netUp.map { $0 / 1024 } }, battery, source, top].joined(separator: ", "))
         }
         return out
     }

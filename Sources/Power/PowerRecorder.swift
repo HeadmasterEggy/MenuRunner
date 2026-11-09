@@ -70,11 +70,15 @@ final class PowerRecorder {
         let monitor = self.monitor
         sampleQueue.async { [weak self] in
             let r = monitor.read()
-            let live = r.map { AppIdentity.group($0.perPid, limit: Self.appsPerReading) } ?? []
+            let grouped = r.map {
+                AppUsageReading(energy: AppIdentity.group($0.perPid, limit: Self.appsPerReading),
+                                cpu: AppIdentity.group($0.cpuPerPid, limit: Self.appsPerReading),
+                                memory: AppIdentity.group($0.memoryPerPid, limit: Self.appsPerReading))
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.reading = false
-                if let r { self.consume(r, grouped: live) }
+                if let r, let grouped { self.consume(r, grouped: grouped) }
             }
         }
     }
@@ -89,9 +93,9 @@ final class PowerRecorder {
         timer = t
     }
 
-    private func consume(_ r: PowerReading, grouped: [AppStat]) {
+    private func consume(_ r: PowerReading, grouped: AppUsageReading) {
         liveSystem = r.system
-        liveApps = Array(grouped.prefix(Self.liveLimit))
+        liveApps = Array(grouped.energy.prefix(Self.liveLimit))
         if enabled {
             rollIfNeeded()
             current.add(system: r.system, apps: grouped, interval: r.interval)
