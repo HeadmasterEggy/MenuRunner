@@ -45,25 +45,55 @@ extension ChartCard where Accessory == EmptyView {
 
 struct MetricTiles: View {
     @ObservedObject var m: AnalysisModel
+    var columns = 6
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
-            ForEach(m.availableMetrics) { metric in
-                let selected = m.metric == metric
-                Button { withAnimation(.snappy) { m.metric = metric } } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(metric.title, systemImage: metric.icon).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        Text(PowerStats.average(m.buckets, metric: metric).map(metric.format) ?? "--")
-                            .font(.headline.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
-                        Text(metric.usesMax ? L("最高", "Peak") : L("平均", "Average")).font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .glassCard(radius: GlassMetrics.tileRadius, tint: selected ? Color.accentColor.opacity(0.16) : nil, interactive: true)
-                }
-                .buttonStyle(.plain)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: columns), spacing: 10) {
+            ForEach(m.availableMetrics) { metric in tile(metric) }
+        }
+    }
+
+    private func tile(_ metric: Metric) -> some View {
+        let selected = m.metric == metric
+        let points = PowerStats.trend(m.buckets, metric: metric, step: m.step, app: nil, cores: m.cores)
+        return Button { withAnimation(.snappy) { m.metric = metric } } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(metric.title, systemImage: metric.icon).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(PowerStats.average(m.buckets, metric: metric).map(metric.format) ?? "--")
+                    .font(.title3.weight(.semibold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.6)
+                Sparkline(points: points, color: selected ? Color.accentColor : ChartPalette.accent)
+                    .frame(height: 18)
             }
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .glassCard(radius: GlassMetrics.tileRadius, tint: selected ? Color.accentColor.opacity(0.16) : nil, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .help(metric.usesMax ? L("最高值", "Peak") : L("平均值", "Average"))
+    }
+}
+
+struct Sparkline: View {
+    let points: [TrendPoint]
+    let color: Color
+
+    var body: some View {
+        if points.count >= 2 {
+            Chart(points) { p in
+                AreaMark(x: .value("Time", p.time), y: .value("Value", p.value))
+                    .foregroundStyle(LinearGradient(colors: [color.opacity(0.3), color.opacity(0)], startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.monotone)
+                LineMark(x: .value("Time", p.time), y: .value("Value", p.value))
+                    .foregroundStyle(color)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    .interpolationMethod(.monotone)
+            }
+            .chartXAxis(.hidden)
+            .chartYAxis(.hidden)
+            .chartLegend(.hidden)
+        } else {
+            Color.clear
         }
     }
 }
