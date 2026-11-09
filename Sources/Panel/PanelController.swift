@@ -303,9 +303,10 @@ final class PanelController: NSObject, NSPopoverDelegate {
         }
     }
 
-    private func openAnalysis() {
-        hide()
-        AnalysisWindow.shared.show(spec: spec)
+    func openAnalysis() {
+        guard let w = popover.contentViewController?.view.window else { return }
+        AnalysisPanel.shared.onClose = { AnalysisPanel.shared.hide() }
+        AnalysisPanel.shared.show(spec: spec, beside: w.frame, screen: w.screen)
     }
 
     private func drawApps(_ w: CGFloat, _ title: String, _ apps: [AppStat], _ fmt: (Double) -> String) {
@@ -505,6 +506,7 @@ final class PanelController: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         guard !isOpen else { return }
         if let m = outsideMonitor { NSEvent.removeMonitor(m); outsideMonitor = nil }
+        AnalysisPanel.shared.hide()
         timer?.invalidate(); timer = nil
         if cards.first !== mainPage.cards.first { backToMain() }
         onVisibilityChange(false)

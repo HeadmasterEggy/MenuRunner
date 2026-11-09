@@ -31,9 +31,9 @@ struct ChartCard<Content: View, Accessory: View>: View {
             }
             content
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.05)))
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .glassCard()
     }
 }
 
@@ -45,26 +45,55 @@ extension ChartCard where Accessory == EmptyView {
 
 struct MetricTiles: View {
     @ObservedObject var m: AnalysisModel
+    var columns = 6
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
-            ForEach(m.availableMetrics) { metric in
-                let selected = m.metric == metric
-                Button { withAnimation(.snappy) { m.metric = metric } } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(metric.title, systemImage: metric.icon).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        Text(PowerStats.average(m.buckets, metric: metric).map(metric.format) ?? "--")
-                            .font(.headline.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
-                        Text(metric.usesMax ? L("最高", "Peak") : L("平均", "Average")).font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(selected ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.05)))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Color.accentColor : .clear, lineWidth: 1.5))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: columns), spacing: 10) {
+            ForEach(m.availableMetrics) { metric in tile(metric) }
+        }
+    }
+
+    private func tile(_ metric: Metric) -> some View {
+        let selected = m.metric == metric
+        let points = PowerStats.trend(m.buckets, metric: metric, step: m.step, app: nil, cores: m.cores)
+        return Button { withAnimation(.snappy) { m.metric = metric } } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(metric.title, systemImage: metric.icon).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(PowerStats.average(m.buckets, metric: metric).map(metric.format) ?? "--")
+                    .font(.title3.weight(.semibold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.6)
+                Sparkline(points: points, color: selected ? Color.accentColor : ChartPalette.accent)
+                    .frame(height: 18)
             }
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .glassCard(radius: GlassMetrics.tileRadius, tint: selected ? Color.accentColor.opacity(0.16) : nil, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .help(metric.usesMax ? L("最高值", "Peak") : L("平均值", "Average"))
+    }
+}
+
+struct Sparkline: View {
+    let points: [TrendPoint]
+    let color: Color
+
+    var body: some View {
+        if points.count >= 2 {
+            Chart(points) { p in
+                AreaMark(x: .value("Time", p.time), y: .value("Value", p.value))
+                    .foregroundStyle(LinearGradient(colors: [color.opacity(0.3), color.opacity(0)], startPoint: .top, endPoint: .bottom))
+                    .interpolationMethod(.monotone)
+                LineMark(x: .value("Time", p.time), y: .value("Value", p.value))
+                    .foregroundStyle(color)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    .interpolationMethod(.monotone)
+            }
+            .chartXAxis(.hidden)
+            .chartYAxis(.hidden)
+            .chartLegend(.hidden)
+        } else {
+            Color.clear
         }
     }
 }
@@ -80,11 +109,15 @@ struct TrendChart: View {
         points.min { abs($0.time.timeIntervalSince(d)) < abs($1.time.timeIntervalSince(d)) }
     }
 
-    private var step: TimeInterval { PowerStats.step(hours: m.rangeHours) }
+    private var step: TimeInterval { m.step }
 
     private func band(_ r: ClosedRange<Date>) -> ClosedRange<Date> {
-        let start = Date(timeIntervalSince1970: floor(r.lowerBound.timeIntervalSince1970 / step) * step)
-        return start...max(r.upperBound, start.addingTimeInterval(step))
+        let start = r.lowerBound
+        let end = max(r.upperBound, start.addingTimeInterval(step))
+        guard let first = points.first?.time, let last = points.last?.time, first < last else { return start...end }
+        let hi = min(max(end, first), last)
+        let lo = min(max(start, first), max(hi.addingTimeInterval(-step), first))
+        return lo...hi
     }
 
     private func hits(_ d: Date) -> [(Int, Finding)] {
@@ -124,7 +157,7 @@ struct TrendChart: View {
             if let s = selected {
                 RuleMark(x: .value("Time", s.time))
                     .foregroundStyle(Color.secondary.opacity(0.5))
-                    .annotation(position: .top, alignment: .center, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                    .annotation(position: .top, alignment: .center, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                         tooltip(s)
                     }
                 PointMark(x: .value("Time", s.time), y: .value("Value", s.value)).foregroundStyle(ChartPalette.accent).symbolSize(50)
@@ -172,7 +205,7 @@ struct TrendChart: View {
             }
         }
         .padding(6)
-        .background(RoundedRectangle(cornerRadius: 6).fill(.regularMaterial))
+        .glassCard(radius: 10)
     }
 }
 
@@ -183,7 +216,7 @@ struct RankingChart: View {
     var body: some View {
         let shares = m.ranking
         let total = max(shares.reduce(0) { $0 + $1.joules }, 0.0001)
-        HStack(alignment: .center, spacing: 20) {
+        HStack(alignment: .center, spacing: 14) {
             Chart(Array(shares.enumerated()), id: \.element.id) { i, s in
                 let focus = m.selectedApp ?? hovered
                 SectorMark(angle: .value("Value", s.joules), innerRadius: .ratio(0.62),
@@ -192,7 +225,7 @@ struct RankingChart: View {
                     .foregroundStyle(ChartPalette.color(s, at: i))
                     .opacity(focus == nil || focus == s.name ? 1 : 0.3)
             }
-            .frame(width: 160, height: 160)
+            .frame(width: 140, height: 140)
             .overlay {
                 VStack(spacing: 2) {
                     Text(m.rankKind == .memory ? L("峰值", "Peak") : L("合计", "Total")).font(.caption2).foregroundStyle(.secondary)
@@ -219,10 +252,9 @@ struct RankingChart: View {
                 Text(ChartPalette.label(s)).lineLimit(1)
                 if let v = m.parsed?.verdict(for: s.name) {
                     Image(systemName: v.verdict.icon).font(.caption).foregroundStyle(v.verdict.color)
-                    if v.verdict != .expected { Text(v.note).font(.caption).foregroundStyle(v.verdict.color).lineLimit(1) }
                 }
                 Spacer(minLength: 8)
-                Text(m.rankKind.format(s.joules, seconds: m.recordedSeconds)).foregroundStyle(.secondary)
+                Text(m.rankKind.format(s.joules, seconds: m.recordedSeconds)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
                 if m.rankKind != .memory { Text(String(format: "%.0f%%", share * 100)).frame(width: 40, alignment: .trailing) }
             }
             .font(.callout.monospacedDigit())

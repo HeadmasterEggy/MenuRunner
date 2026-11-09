@@ -35,47 +35,44 @@ struct MarkdownText: View {
 
 struct AnalysisView: View {
     @ObservedObject var m: AnalysisModel
+    var onClose: () -> Void = {}
+    @State private var showSettings = false
+
+    private static let wideWidth: CGFloat = 900
 
     private var dateText: String {
         guard let d = m.resultDate else { return "" }
         return L("上次分析：", "Last analysis: ") + d.formatted(date: .abbreviated, time: .shortened)
     }
 
-    @State private var showSettings = false
+    private var stepText: String {
+        let minutes = Int(m.step / 60)
+        return minutes < 60 ? L("每 \(minutes) 分钟", "per \(minutes) min") : L("每 \(minutes / 60) 小时", "per \(minutes / 60) h")
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label(L("AI 系统分析", "AI System Analysis"), systemImage: "sparkles").font(.title3.weight(.semibold))
-                Spacer()
-                Text(L("已记录 ", "Recorded ") + AnalysisModel.spanText(m.recordedHours)).font(.callout).foregroundStyle(.secondary)
-            }
-            DisclosureGroup(isExpanded: $showSettings) { settings.padding(.top, 8) } label: {
-                Text(L("AI 服务：", "AI service: ") + m.provider.title + (m.model.isEmpty ? "" : " · " + m.model)).font(.callout)
-            }
-            HStack(spacing: 10) {
-                Picker("", selection: $m.rangeHours) {
-                    ForEach(AnalysisModel.ranges, id: \.self) { Text(L("最近 ", "Last ") + AnalysisModel.rangeTitle($0)).tag($0) }
-                }
-                .labelsHidden().pickerStyle(.segmented).fixedSize()
-                Spacer()
-                if m.running {
-                    ProgressView().controlSize(.small)
-                    Text(L("分析中…", "Analyzing…")).font(.callout).foregroundStyle(.secondary)
-                    Button(L("取消", "Cancel")) { m.cancel() }
-                } else {
-                    if !m.result.isEmpty { Button(L("复制", "Copy")) { m.copyResult() } }
-                    Button(L("开始 AI 分析", "Run AI Analysis")) { m.analyze() }.keyboardShortcut(.defaultAction)
+        VStack(alignment: .leading, spacing: GlassMetrics.spacing) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) { titleBlock; Spacer(minLength: 12); rangePicker; actions }
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack { titleBlock; Spacer() }
+                    HStack(spacing: 10) { rangePicker; Spacer(minLength: 8); actions }
                 }
             }
+            .padding(.horizontal, 18).padding(.vertical, 14)
+            .glassCard()
             if let e = m.error { Text(e).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let r = m.parsed { AnalysisSummary(result: r, m: m) }
-                    dataSection
-                    aiSection
+            GeometryReader { g in
+                ScrollView {
+                    GlassGroup {
+                        content(wide: g.size.width >= Self.wideWidth)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 2)
+                            .padding(.trailing, 10)
+                    }
                 }
-                .padding(.vertical, 4)
+                .padding(.trailing, -10)
+                .scrollContentBackground(.hidden)
             }
             HStack {
                 Text(dateText)
@@ -83,66 +80,138 @@ struct AnalysisView: View {
                 Text(L("分析时会把汇总数据发送给所选的 AI 服务", "Summarized data is sent to the selected AI service"))
             }
             .font(.caption).foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
         }
-        .padding(20)
-        .frame(minWidth: 640, minHeight: 640)
-        .onAppear { showSettings = (m.apiKey.isEmpty && m.provider == .anthropic) || m.model.isEmpty }
-    }
-
-    private var stepText: String {
-        let minutes = Int(PowerStats.step(hours: m.rangeHours) / 60)
-        return minutes < 60 ? L("每 \(minutes) 分钟", "per \(minutes) min") : L("每 \(minutes / 60) 小时", "per \(minutes / 60) h")
-    }
-
-    @ViewBuilder private var dataSection: some View {
-        if m.buckets.isEmpty {
-            ChartCard(title: L("数据", "Data"), icon: "chart.bar") {
-                Text(L("还没有记录到数据。MenuRunner 每 5 分钟存一次，过一会儿再来看。", "Nothing recorded yet. MenuRunner saves every 5 minutes; check back soon."))
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            MetricTiles(m: m)
-            ChartCard(title: m.metric.title + L("趋势（", " trend (") + stepText + L("）", ")"), icon: "chart.xyaxis.line") {
-                if let app = m.selectedApp {
-                    Button { withAnimation(.snappy) { m.selectedApp = nil } } label: {
-                        Label(app, systemImage: "xmark.circle.fill").font(.caption)
-                    }
-                    .buttonStyle(.bordered).controlSize(.small).tint(ChartPalette.app)
-                }
-            } content: {
-                if m.trend.count >= 2 { TrendChart(m: m) } else {
-                    Text(L("数据点太少，多记录一会儿再看趋势。", "Not enough points yet for a trend.")).foregroundStyle(.secondary)
-                }
-                if m.selectedApp != nil && !(m.metric == .power || m.metric == .cpu || m.metric == .memory) {
-                    Text(L("这个指标没有按应用的数据，切到功耗、CPU 或内存可以看所选应用的曲线。", "This metric has no per-app data; switch to Power, CPU or Memory to see the selected app."))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            ChartCard(title: L("应用排行", "Top apps"), icon: "chart.pie.fill") {
-                Picker("", selection: $m.rankKind) {
-                    ForEach(RankKind.allCases) { Text($0.title).tag($0) }
-                }
-                .labelsHidden().pickerStyle(.segmented).fixedSize()
-            } content: {
-                RankingChart(m: m)
-            }
-            if m.daily.count >= 2 {
-                ChartCard(title: L("每天耗电", "Energy per day"), icon: "chart.bar.fill") { DailyEnergyChart(days: m.daily) }
+        .padding(16)
+        .background(AmbientBackdrop().clipShape(.rect(cornerRadius: 24)))
+        .onAppear {
+            if (m.apiKey.isEmpty && m.provider == .anthropic) || m.model.isEmpty {
+                DispatchQueue.main.async { showSettings = true }
             }
         }
     }
 
-    @ViewBuilder private var aiSection: some View {
+    private var titleBlock: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles").font(.title2).foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(L("AI 系统分析", "AI System Analysis")).font(.title3.weight(.semibold))
+                Text(m.provider.title + (m.model.isEmpty ? "" : " · " + m.model) + " · " + L("已记录 ", "recorded ") + AnalysisModel.spanText(m.recordedHours))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .fixedSize()
+    }
+
+    private var rangePicker: some View {
+        Picker("", selection: $m.rangeHours) {
+            ForEach(AnalysisModel.ranges, id: \.self) { Text(AnalysisModel.rangeTitle($0)).tag($0) }
+        }
+        .labelsHidden().pickerStyle(.segmented).fixedSize().focusEffectDisabled()
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }
+                .glassButton()
+                .focusEffectDisabled()
+                .accessibilityLabel(L("AI 服务设置", "AI service settings"))
+                .help(L("AI 服务设置", "AI service settings"))
+                .popover(isPresented: $showSettings, arrowEdge: .bottom) { settings.padding(16).frame(width: 440) }
+            if m.running {
+                ProgressView().controlSize(.small)
+                Button(L("取消", "Cancel")) { m.cancel() }.glassButton()
+            } else {
+                if !m.result.isEmpty {
+                    Button { m.copyResult() } label: { Image(systemName: "doc.on.doc") }
+                        .glassButton().focusEffectDisabled()
+                        .accessibilityLabel(L("复制分析结果", "Copy the analysis")).help(L("复制分析结果", "Copy the analysis"))
+                }
+                Button(L("开始分析", "Analyze"), systemImage: "sparkles") { m.analyze() }
+                    .glassButton(prominent: true).keyboardShortcut(.defaultAction)
+            }
+            Button { onClose() } label: { Image(systemName: "xmark") }
+                .glassButton().focusEffectDisabled()
+                .accessibilityLabel(L("关闭", "Close"))
+                .keyboardShortcut("w", modifiers: .command)
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder private func content(wide: Bool) -> some View {
+        VStack(alignment: .leading, spacing: GlassMetrics.spacing) {
+            if m.buckets.isEmpty {
+                ChartCard(title: L("数据", "Data"), icon: "chart.bar") {
+                    Text(L("还没有记录到数据。MenuRunner 每 5 分钟存一次，过一会儿再来看。", "Nothing recorded yet. MenuRunner saves every 5 minutes; check back soon."))
+                        .foregroundStyle(.secondary)
+                }
+            } else if wide {
+                HStack(alignment: .top, spacing: GlassMetrics.spacing) {
+                    summary.frame(maxWidth: .infinity, alignment: .top)
+                    rankingCard.frame(maxWidth: .infinity, alignment: .top)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                MetricTiles(m: m, columns: 6)
+                trendCard
+                details
+            } else {
+                summary
+                MetricTiles(m: m, columns: 4)
+                trendCard
+                rankingCard
+                details
+            }
+        }
+    }
+
+    @ViewBuilder private var summary: some View {
         if let r = m.parsed {
-            AnalysisDetails(result: r, m: m)
+            AnalysisSummary(result: r, m: m)
         } else if !m.result.isEmpty {
             ChartCard(title: L("AI 分析", "AI analysis"), icon: "sparkles") { MarkdownText(text: m.result) }
         } else {
             ChartCard(title: L("AI 分析", "AI analysis"), icon: "sparkles") {
-                Text(L("让 MenuRunner 记录一段时间（最好一天以上），然后点「开始 AI 分析」。AI 会给出能效评分、发现的问题，以及按影响排序的建议。",
-                       "Let MenuRunner record for a while (ideally a day or more), then click Run AI Analysis to get an efficiency score, findings and suggestions ranked by impact."))
+                Text(L("让 MenuRunner 记录一段时间（最好一天以上），然后点「开始分析」。AI 会给出健康评分、各分类评分、问题时段和建议。",
+                       "Let MenuRunner record for a while (ideally a day or more), then click Analyze to get a health score, per-category scores, problem periods and suggestions."))
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var trendCard: some View {
+        ChartCard(title: m.metric.title + L("趋势（", " trend (") + stepText + L("）", ")"), icon: "chart.xyaxis.line") {
+            if let app = m.selectedApp {
+                Button { withAnimation(.snappy) { m.selectedApp = nil } } label: {
+                    Label(app, systemImage: "xmark.circle.fill").font(.caption)
+                }
+                .glassButton().controlSize(.small).tint(ChartPalette.app)
+            }
+        } content: {
+            if m.trend.count >= 2 { TrendChart(m: m) } else {
+                Text(L("数据点太少，多记录一会儿再看趋势。", "Not enough points yet for a trend.")).foregroundStyle(.secondary)
+            }
+            if m.selectedApp != nil && !(m.metric == .power || m.metric == .cpu || m.metric == .memory) {
+                Text(L("这个指标没有按应用的数据，切到功耗、CPU 或内存可以看所选应用的曲线。", "This metric has no per-app data; switch to Power, CPU or Memory to see the selected app."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var rankingCard: some View {
+        ChartCard(title: L("应用排行", "Top apps"), icon: "chart.pie.fill") {
+            Picker("", selection: $m.rankKind) {
+                ForEach(RankKind.allCases) { Text($0.title).tag($0) }
+            }
+            .labelsHidden().pickerStyle(.segmented).fixedSize()
+        } content: {
+            RankingChart(m: m)
+        }
+    }
+
+    @ViewBuilder private var details: some View {
+        if let r = m.parsed { AnalysisDetails(result: r, m: m) }
+        if m.daily.count >= 2 {
+            ChartCard(title: L("每天耗电", "Energy per day"), icon: "chart.bar.fill") { DailyEnergyChart(days: m.daily) }
         }
     }
 

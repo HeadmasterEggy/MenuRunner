@@ -87,6 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--settings-window") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.showSettings() }
         }
+        if CommandLine.arguments.contains("--open-analysis") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                self.panel.show(below: button)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.panel.openAnalysis() }
+            }
+        }
         if CommandLine.arguments.contains("--open-settings") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.popSettings(from: button) }
         }
@@ -288,8 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.openActivityMonitor = { [weak self] in self?.openActivityMonitor() }
         m.openAnalysis = { [weak self] in
             guard let self else { return }
-            self.panel.hide()
-            AnalysisWindow.shared.show(spec: self.panel.spec)
+            self.panel.openAnalysis()
         }
         return m
     }()
