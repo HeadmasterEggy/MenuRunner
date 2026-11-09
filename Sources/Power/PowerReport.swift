@@ -6,7 +6,7 @@ enum PowerReport {
     private static let hourlyAppCount = 3
 
     static var systemPrompt: String {
-        let language = Lang.isZh ? "Write the whole answer in Simplified Chinese." : "Write the whole answer in English."
+        let language = Lang.isZh ? "Write every text value in Simplified Chinese." : "Write every text value in English."
         return """
         You analyze energy and performance data recorded on a Mac by MenuRunner, a menu bar system monitor. \
         The user wants to understand what drains power on their Mac and what they can change. \
@@ -16,8 +16,9 @@ enum PowerReport {
         how power relates to CPU, GPU, temperature and fan speed; anything that looks abnormal; \
         and a short list of concrete, practical suggestions ordered by expected impact. \
         Per-app figures come from the kernel's per-process energy counters, so they are estimates that do not add up to the whole-system figure. \
-        Format with short markdown headings and bullet lists, no tables. \(language)
-        """
+        \(language)
+
+        """ + AnalysisResult.schemaPrompt
     }
 
     static func build(_ buckets: [PowerBucket], spec: MachineSpec) -> String {

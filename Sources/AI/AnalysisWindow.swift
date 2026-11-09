@@ -17,7 +17,7 @@ final class AnalysisWindow: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow() -> NSWindow {
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 680),
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 860),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         w.title = L("AI 功耗分析", "AI Power Analysis")
         w.isReleasedWhenClosed = false

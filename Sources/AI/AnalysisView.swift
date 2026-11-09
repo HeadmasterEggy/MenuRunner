@@ -41,37 +41,41 @@ struct AnalysisView: View {
         return L("上次分析：", "Last analysis: ") + d.formatted(date: .abbreviated, time: .shortened)
     }
 
+    @State private var showSettings = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label(L("AI 功耗分析", "AI Power Analysis"), systemImage: "sparkles").font(.title3.weight(.semibold))
                 Spacer()
                 Text(L("已记录 ", "Recorded ") + AnalysisModel.spanText(m.recordedHours)).font(.callout).foregroundStyle(.secondary)
             }
-            settings
+            DisclosureGroup(isExpanded: $showSettings) { settings.padding(.top, 8) } label: {
+                Text(L("AI 服务：", "AI service: ") + m.provider.title + (m.model.isEmpty ? "" : " · " + m.model)).font(.callout)
+            }
             HStack(spacing: 10) {
-                if m.running {
-                    Button(L("取消", "Cancel")) { m.cancel() }
-                    ProgressView().controlSize(.small)
-                    Text(L("分析中，可能需要一两分钟…", "Analyzing, this can take a minute or two…")).font(.callout).foregroundStyle(.secondary)
-                } else {
-                    Button(L("开始分析", "Analyze")) { m.analyze() }.keyboardShortcut(.defaultAction)
+                Picker("", selection: $m.rangeHours) {
+                    ForEach(AnalysisModel.ranges, id: \.self) { Text(L("最近 ", "Last ") + AnalysisModel.rangeTitle($0)).tag($0) }
                 }
+                .labelsHidden().pickerStyle(.segmented).fixedSize()
                 Spacer()
-                if !m.result.isEmpty { Button(L("复制结果", "Copy")) { m.copyResult() } }
+                if m.running {
+                    ProgressView().controlSize(.small)
+                    Text(L("分析中…", "Analyzing…")).font(.callout).foregroundStyle(.secondary)
+                    Button(L("取消", "Cancel")) { m.cancel() }
+                } else {
+                    if !m.result.isEmpty { Button(L("复制", "Copy")) { m.copyResult() } }
+                    Button(L("开始 AI 分析", "Run AI Analysis")) { m.analyze() }.keyboardShortcut(.defaultAction)
+                }
             }
             if let e = m.error { Text(e).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
             ScrollView {
-                if m.result.isEmpty {
-                    Text(L("让 MenuRunner 记录一段时间（最好一天以上），然后点「开始分析」。AI 会根据各应用的耗电、CPU、GPU、温度、风扇和电池数据给出分析和建议。",
-                           "Let MenuRunner record for a while (ideally a day or more), then click Analyze. The AI looks at per-app energy, CPU, GPU, temperature, fan and battery data and suggests improvements."))
-                        .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    MarkdownText(text: m.result)
+                VStack(alignment: .leading, spacing: 14) {
+                    dataSection
+                    aiSection
                 }
+                .padding(.vertical, 4)
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
             HStack {
                 Text(dateText)
                 Spacer()
@@ -80,7 +84,41 @@ struct AnalysisView: View {
             .font(.caption).foregroundStyle(.secondary)
         }
         .padding(20)
-        .frame(minWidth: 520, minHeight: 560)
+        .frame(minWidth: 640, minHeight: 640)
+        .onAppear { showSettings = (m.apiKey.isEmpty && m.provider == .anthropic) || m.model.isEmpty }
+    }
+
+    @ViewBuilder private var dataSection: some View {
+        if m.shares.isEmpty && m.trend.isEmpty {
+            ChartCard(title: L("数据", "Data"), icon: "chart.bar") {
+                Text(L("还没有记录到数据。MenuRunner 每 5 分钟存一次，过一会儿再来看。", "Nothing recorded yet. MenuRunner saves every 5 minutes; check back soon."))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            if !m.shares.isEmpty {
+                ChartCard(title: L("应用耗电占比", "Energy by app"), icon: "chart.pie.fill") { EnergyShareChart(shares: m.shares) }
+            }
+            if m.trend.count >= 2 {
+                ChartCard(title: L("整机功耗趋势（每小时平均）", "System power (hourly average)"), icon: "chart.xyaxis.line") { PowerTrendChart(points: m.trend) }
+            }
+            if m.daily.count >= 2 {
+                ChartCard(title: L("每天耗电", "Energy per day"), icon: "chart.bar.fill") { DailyEnergyChart(days: m.daily) }
+            }
+        }
+    }
+
+    @ViewBuilder private var aiSection: some View {
+        if let r = m.parsed {
+            AnalysisResultView(result: r, shares: m.shares)
+        } else if !m.result.isEmpty {
+            ChartCard(title: L("AI 分析", "AI analysis"), icon: "sparkles") { MarkdownText(text: m.result) }
+        } else {
+            ChartCard(title: L("AI 分析", "AI analysis"), icon: "sparkles") {
+                Text(L("让 MenuRunner 记录一段时间（最好一天以上），然后点「开始 AI 分析」。AI 会给出能效评分、发现的问题，以及按影响排序的建议。",
+                       "Let MenuRunner record for a while (ideally a day or more), then click Run AI Analysis to get an efficiency score, findings and suggestions ranked by impact."))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var settings: some View {
@@ -115,13 +153,6 @@ struct AnalysisView: View {
                 SecureField(m.provider == .anthropic ? "sk-ant-…" : L("本地模型可留空", "Optional for local models"), text: $m.apiKey)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { m.saveKey() }
-            }
-            GridRow {
-                Text(L("数据范围", "Range"))
-                Picker("", selection: $m.rangeHours) {
-                    ForEach(AnalysisModel.ranges, id: \.self) { Text(L("最近 ", "Last ") + AnalysisModel.rangeTitle($0)).tag($0) }
-                }
-                .labelsHidden().pickerStyle(.segmented)
             }
         }
     }

@@ -2,15 +2,20 @@ import AppKit
 
 final class AnalysisModel: ObservableObject {
     static let ranges = [24, 72, 168, 336]
+    static let shareLimit = 6
 
     @Published var provider: AIProvider { didSet { defaults.set(provider.rawValue, forKey: "aiProvider"); loadKey() } }
     @Published var claudeModel: String { didSet { defaults.set(claudeModel, forKey: "aiClaudeModel") } }
     @Published var openAIModel: String { didSet { defaults.set(openAIModel, forKey: "aiOpenAIModel") } }
     @Published var openAIBase: String { didSet { defaults.set(openAIBase, forKey: "aiOpenAIBase") } }
-    @Published var rangeHours: Int { didSet { defaults.set(rangeHours, forKey: "aiRangeHours") } }
+    @Published var rangeHours: Int { didSet { defaults.set(rangeHours, forKey: "aiRangeHours"); refresh() } }
     @Published var apiKey = ""
     @Published var running = false
-    @Published var result: String
+    @Published var result: String { didSet { parsed = AnalysisResult.parse(result) } }
+    @Published var parsed: AnalysisResult?
+    @Published var shares: [EnergyShare] = []
+    @Published var trend: [TrendPoint] = []
+    @Published var daily: [DailyEnergy] = []
     @Published var resultDate: Date?
     @Published var error: String?
     @Published var recordedHours = 0.0
@@ -29,10 +34,19 @@ final class AnalysisModel: ObservableObject {
         rangeHours = Self.ranges.contains(r) ? r : 168
         result = d.string(forKey: "aiLastResult") ?? ""
         resultDate = d.object(forKey: "aiLastResultDate") as? Date
+        parsed = AnalysisResult.parse(result)
         loadKey()
     }
 
-    func refresh() { recordedHours = PowerRecorder.shared.recordedSeconds(hours: Double(PowerRecorder.retention / 3600)) / 3600 }
+    func refresh() {
+        recordedHours = PowerRecorder.shared.recordedSeconds(hours: Double(PowerRecorder.retention / 3600)) / 3600
+        let buckets = PowerRecorder.shared.recent(hours: Double(rangeHours))
+        shares = PowerStats.shares(buckets, limit: Self.shareLimit)
+        trend = PowerStats.hourlyTrend(buckets)
+        daily = PowerStats.daily(buckets)
+    }
+
+    var totalShareJoules: Double { shares.reduce(0) { $0 + $1.joules } }
 
     private func loadKey() { apiKey = APIKeyStore.load(provider.rawValue) }
 
@@ -58,6 +72,7 @@ final class AnalysisModel: ObservableObject {
                 switch r {
                 case .success(let text):
                     self.result = text
+                    self.refresh()
                     self.resultDate = Date()
                     self.defaults.set(text, forKey: "aiLastResult")
                     self.defaults.set(self.resultDate, forKey: "aiLastResultDate")
