@@ -87,6 +87,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--settings-window") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.showSettings() }
         }
+        if CommandLine.arguments.contains("--open-analysis") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { AnalysisWindow.shared.show(spec: self.panel.spec) }
+        }
         if CommandLine.arguments.contains("--open-settings") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.popSettings(from: button) }
         }
