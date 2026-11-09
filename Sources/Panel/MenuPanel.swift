@@ -34,7 +34,17 @@ final class MenuPanel: NSObject {
         window.animationBehavior = .none
         window.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary, .canJoinAllSpaces]
         content.frame = NSRect(origin: .zero, size: size)
-        window.contentView = GlassBackground.window(frame: NSRect(origin: .zero, size: size), cornerRadius: Self.cornerRadius, content: content)
+        let bounds = NSRect(origin: .zero, size: size)
+        let clip = NSView(frame: bounds)
+        clip.wantsLayer = true
+        clip.layer?.cornerRadius = Self.cornerRadius
+        clip.layer?.cornerCurve = .continuous
+        clip.layer?.masksToBounds = true
+        clip.layer?.backgroundColor = NSColor.clear.cgColor
+        let glass = GlassBackground.window(frame: bounds, cornerRadius: Self.cornerRadius, content: content)
+        glass.autoresizingMask = [.width, .height]
+        clip.addSubview(glass)
+        window.contentView = clip
     }
 
     var isShown: Bool { window.isVisible }
@@ -54,6 +64,7 @@ final class MenuPanel: NSObject {
             let target = clamp(NSRect(x: old.midX - newValue.width / 2, y: old.maxY - newValue.height,
                                       width: newValue.width, height: newValue.height), on: window.screen)
             window.setFrame(target, display: true, animate: window.isVisible)
+            window.invalidateShadow()
         }
     }
 
@@ -68,12 +79,12 @@ final class MenuPanel: NSObject {
         window.alphaValue = 0
         window.orderFrontRegardless()
         window.makeKey()
-        NSAnimationContext.runAnimationGroup { c in
+        NSAnimationContext.runAnimationGroup({ c in
             c.duration = 0.18
             c.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().setFrame(target, display: true)
             window.animator().alphaValue = 1
-        }
+        }, completionHandler: { [weak self] in self?.window.invalidateShadow() })
     }
 
     func close() {
