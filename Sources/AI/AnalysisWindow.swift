@@ -12,6 +12,7 @@ final class AnalysisWindow: NSObject, NSWindowDelegate {
         let w = window ?? makeWindow()
         window = w
         installEditMenu()
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
     }
@@ -30,7 +31,10 @@ final class AnalysisWindow: NSObject, NSWindowDelegate {
         return w
     }
 
-    func windowWillClose(_ notification: Notification) { model.saveKey() }
+    func windowWillClose(_ notification: Notification) {
+        model.saveKey()
+        DispatchQueue.main.async { NSApp.setActivationPolicy(.accessory) }
+    }
 
     private func installEditMenu() {
         guard NSApp.mainMenu == nil else { return }

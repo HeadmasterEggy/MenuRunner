@@ -60,7 +60,7 @@ struct MetricTiles: View {
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
-                    .glassCard(radius: GlassMetrics.tileRadius, tint: selected ? Color.accentColor.opacity(0.35) : nil, interactive: true)
+                    .glassCard(radius: GlassMetrics.tileRadius, tint: selected ? Color.accentColor.opacity(0.16) : nil, interactive: true)
                 }
                 .buttonStyle(.plain)
             }

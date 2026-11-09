@@ -57,8 +57,11 @@ struct AnalysisView: View {
                         aiSection
                     }
                     .padding(.vertical, 4)
+                    .padding(.horizontal, 2)
+                    .padding(.trailing, 10)
                 }
             }
+            .padding(.trailing, -10)
             .scrollContentBackground(.hidden)
             HStack {
                 Text(dateText)
@@ -69,7 +72,7 @@ struct AnalysisView: View {
         }
         .padding(.horizontal, 20).padding(.bottom, 16).padding(.top, 8)
         .frame(minWidth: 640, minHeight: 640)
-        .background(WindowGlassBackground().ignoresSafeArea())
+        .background(WindowBackdrop())
         .onAppear { showSettings = (m.apiKey.isEmpty && m.provider == .anthropic) || m.model.isEmpty }
     }
 
@@ -83,6 +86,7 @@ struct AnalysisView: View {
             DisclosureGroup(isExpanded: $showSettings) { settings.padding(.top, 8) } label: {
                 Text(L("AI 服务：", "AI service: ") + m.provider.title + (m.model.isEmpty ? "" : " · " + m.model)).font(.callout)
             }
+            .focusEffectDisabled()
             HStack(spacing: 10) {
                 Picker("", selection: $m.rangeHours) {
                     ForEach(AnalysisModel.ranges, id: \.self) { Text(L("最近 ", "Last ") + AnalysisModel.rangeTitle($0)).tag($0) }
