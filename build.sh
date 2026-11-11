@@ -14,7 +14,7 @@ cat > $APP/Contents/Info.plist <<PLIST
   <key>CFBundleIdentifier</key><string>local.joey.menurunner</string>
   <key>CFBundleExecutable</key><string>MenuRunner</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.9.3</string>
+  <key>CFBundleShortVersionString</key><string>1.10.0</string>
   <key>LSUIElement</key><true/>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
