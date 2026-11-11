@@ -4,7 +4,7 @@ import Charts
 enum ChartPalette {
     static let apps: [Color] = [.blue, .orange, .green, .pink, .purple, .teal, .indigo, .mint]
     static let other = Color.gray.opacity(0.6)
-    static let accent = Color.yellow
+    static let accent = Color.blue
     static let app = Color.pink
 
     static func color(_ share: EnergyShare, at index: Int) -> Color {
@@ -127,7 +127,7 @@ struct TrendChart: View {
             ForEach(m.chartFindings) { c in
                 let f = c.finding, n = c.number, b = c.band
                 RectangleMark(xStart: .value("Start", b.lowerBound), xEnd: .value("End", b.upperBound))
-                    .foregroundStyle(f.severity.color.opacity(m.focusFinding == f.id ? 0.3 : (m.focusFinding == nil ? 0.14 : 0.06)))
+                    .foregroundStyle(f.severity.color.opacity(m.focusFinding == f.id ? 0.22 : (m.focusFinding == nil ? 0.1 : 0.04)))
                     .annotation(position: .top, alignment: .leading, spacing: 2) {
                         Text("\(n)").font(.caption2.weight(.bold)).foregroundStyle(.white)
                             .frame(width: 16, height: 16).background(Circle().fill(f.severity.color))
@@ -135,7 +135,7 @@ struct TrendChart: View {
             }
             ForEach(points) { p in
                 AreaMark(x: .value("Time", p.time), y: .value("Value", p.value), series: .value("Series", "system"))
-                    .foregroundStyle(LinearGradient(colors: [ChartPalette.accent.opacity(0.4), ChartPalette.accent.opacity(0.03)], startPoint: .top, endPoint: .bottom))
+                    .foregroundStyle(LinearGradient(colors: [ChartPalette.accent.opacity(0.28), ChartPalette.accent.opacity(0.02)], startPoint: .top, endPoint: .bottom))
                     .interpolationMethod(.monotone)
                 LineMark(x: .value("Time", p.time), y: .value("Value", p.value), series: .value("Series", "system"))
                     .foregroundStyle(ChartPalette.accent)
@@ -153,11 +153,13 @@ struct TrendChart: View {
             }
             if let s = selected {
                 RuleMark(x: .value("Time", s.time))
-                    .foregroundStyle(Color.secondary.opacity(0.5))
+                    .foregroundStyle(Color.primary.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                     .annotation(position: .top, alignment: .center, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
                         tooltip(s, apps: apps)
                     }
-                PointMark(x: .value("Time", s.time), y: .value("Value", s.value)).foregroundStyle(ChartPalette.accent).symbolSize(50)
+                PointMark(x: .value("Time", s.time), y: .value("Value", s.value)).foregroundStyle(Color(nsColor: .windowBackgroundColor)).symbolSize(90)
+                PointMark(x: .value("Time", s.time), y: .value("Value", s.value)).foregroundStyle(ChartPalette.accent).symbolSize(40)
             }
         }
         .chartYAxis {
@@ -199,11 +201,19 @@ struct TrendChart: View {
                     .font(.caption.monospacedDigit()).foregroundStyle(ChartPalette.app)
             }
             ForEach(hits(p.time)) { c in
-                Text("\(c.number). " + c.finding.title).font(.caption.weight(.medium)).foregroundStyle(c.finding.severity.color).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text("\(c.number)").font(.caption2.weight(.bold)).foregroundStyle(.white)
+                        .frame(width: 14, height: 14).background(Circle().fill(c.finding.severity.color))
+                    Text(c.finding.title).font(.caption.weight(.medium)).foregroundStyle(.primary).lineLimit(1)
+                }
             }
         }
-        .padding(6)
-        .glassCard(radius: 10)
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(nsColor: .windowBackgroundColor))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+        }
     }
 }
 
