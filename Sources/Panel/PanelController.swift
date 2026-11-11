@@ -23,7 +23,7 @@ final class PanelController: NSObject {
         self.model = model
         super.init()
         build()
-        detail.onUpdate = { [weak self] in self?.settle() }
+        detail.onUpdate = { [weak self] in self?.settle(); self?.refitDetail() }
     }
 
     private struct Page { let view: NSView; let size: NSSize; let cards: [CardView]; var glass: [NSView] = [] }
@@ -258,8 +258,41 @@ final class PanelController: NSObject {
 
     private func showDetail(_ k: DetailKind) {
         detailKind = k
+        detailView = nil
         detail.reset()
         refreshDetail(wait: true)
+        let page = detailPage(k)
+        detailView = page.view
+        switchTo(page)
+        detailTimer?.invalidate()
+        let interval: Double = (k == .memory || k == .storage || k == .system) ? 2 : 1.5
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.refreshDetail() }
+        RunLoop.main.add(t, forMode: .common)
+        detailTimer = t
+    }
+
+    private var detailView: NSView?
+    private var detailShape: [Int] = []
+
+    private func shape(_ k: DetailKind) -> [Int] {
+        switch k {
+        case .system, .battery: return [max(1, kvRows.count)]
+        case .temps: return [max(1, min(14, (detail.sensors.count + 1) / 2))]
+        case .storage: return [max(1, detail.volumes.count)]
+        case .network: return [max(1, detail.interfaces.count)]
+        default: return []
+        }
+    }
+
+    private func refitDetail() {
+        guard let shown = detailView, current === shown, shape(detailKind) != detailShape else { return }
+        let page = detailPage(detailKind)
+        detailView = page.view
+        switchTo(page, animated: false)
+    }
+
+    private func detailPage(_ k: DetailKind) -> Page {
+        detailShape = shape(k)
         let W = Self.width
         let dynamic = k == .storage || k == .temps || k == .system || k == .battery || k == .network
         let page = (dynamic ? nil : detailPages[key(k)]) ?? {
@@ -314,12 +347,7 @@ final class PanelController: NSObject {
             detailPages[key(k)] = p
             return p
         }()
-        switchTo(page)
-        detailTimer?.invalidate()
-        let interval: Double = (k == .memory || k == .storage || k == .system) ? 2 : 1.5
-        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.refreshDetail() }
-        RunLoop.main.add(t, forMode: .common)
-        detailTimer = t
+        return page
     }
 
     private func refreshDetail(wait: Bool = false) {
@@ -330,10 +358,12 @@ final class PanelController: NSObject {
         case .battery: kvRows = BatteryDetail.rows()
         default: break
         }
+        refitDetail()
     }
 
     @objc private func backToMain() {
         detailTimer?.invalidate(); detailTimer = nil
+        detailView = nil
         detail.stopNetwork()
         if mainNeedsRebuild { mainPage = makeMainPage() }
         switchTo(mainPage, forward: false, animated: menuPanel.isShown)
