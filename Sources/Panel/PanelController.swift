@@ -381,11 +381,17 @@ final class PanelController: NSObject {
 
     private var host: NSView!
     private var current: NSView?
+    private var switchGeneration = 0
 
     private func switchTo(_ page: Page, forward: Bool = true, animated: Bool = true) {
         cards = page.cards
         settle()
         guard let old = current, old !== page.view else { return }
+        switchGeneration += 1
+        let switching = switchGeneration
+        for view in host.subviews where view !== old {
+            view.removeFromSuperview(); view.alphaValue = 1; view.setFrameOrigin(.zero)
+        }
         let animate = animated && !CommandLine.arguments.contains("--no-anim")
         let dx: CGFloat = 36
         host.setFrameSize(page.size)
@@ -395,8 +401,10 @@ final class PanelController: NSObject {
         host.addSubview(page.view)
         current = page.view
         menuPanel.contentSize = page.size
-        let finish = {
+        let finish = { [weak self] in
+            guard let self, self.switchGeneration == switching else { return }
             old.removeFromSuperview(); old.alphaValue = 1; old.setFrameOrigin(.zero)
+            page.view.setFrameOrigin(.zero); page.view.alphaValue = 1
             page.view.window?.invalidateCursorRects(for: page.view)
         }
         guard animate else { finish(); return }
