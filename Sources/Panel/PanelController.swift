@@ -187,6 +187,7 @@ final class PanelController: NSObject {
 
     private func rebuildMain() {
         guard current === mainPage.view else { mainNeedsRebuild = true; return }
+        switchGeneration += 1
         let old = mainPage.view
         mainPage = makeMainPage()
         cards = mainPage.cards
