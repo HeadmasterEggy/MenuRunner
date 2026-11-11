@@ -8,19 +8,38 @@ final class MenuPanel: NSObject {
         override func cancelOperation(_ sender: Any?) { onEscape() }
     }
 
+    private final class TopAnchoredView: NSView {
+        override var isFlipped: Bool { true }
+    }
+
+    private final class OverlayScroller: NSScroller {
+        override class var isCompatibleWithOverlayScrollers: Bool { true }
+    }
+
     private static let cornerRadius: CGFloat = 22
     private static let gap: CGFloat = 6
     private static let edge: CGFloat = 8
     private static let drop: CGFloat = 6
+    private static let resizeDuration: TimeInterval = 0.2
+    private static let minimumHeight: CGFloat = 160
 
     private let window: Window
     private let content: NSView
+    private let document: TopAnchoredView
+    private let scroll: NSScrollView
+    private var pageSize: NSSize
+    private var anchorTop: CGFloat?
+    private var targetFrame: NSRect?
+    private var styleObserver: NSObjectProtocol?
     private var generation = 0
     var onClose: () -> Void = {}
     var onEscape: () -> Void = {} { didSet { window.onEscape = onEscape } }
 
     init(content: NSView, size: NSSize) {
         self.content = content
+        pageSize = size
+        document = TopAnchoredView(frame: NSRect(origin: .zero, size: size))
+        scroll = NSScrollView(frame: NSRect(origin: .zero, size: size))
         window = Window(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         super.init()
@@ -41,10 +60,27 @@ final class MenuPanel: NSObject {
         clip.layer?.cornerCurve = .continuous
         clip.layer?.masksToBounds = true
         clip.layer?.backgroundColor = NSColor.clear.cgColor
-        let glass = GlassBackground.window(frame: bounds, cornerRadius: Self.cornerRadius, content: content)
+        document.addSubview(content)
+        scroll.verticalScroller = OverlayScroller()
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.horizontalScrollElasticity = .none
+        scroll.verticalScrollElasticity = .none
+        scroll.contentView.drawsBackground = false
+        scroll.documentView = document
+        scroll.autoresizingMask = [.width, .height]
+        let glass = GlassBackground.window(frame: bounds, cornerRadius: Self.cornerRadius, content: scroll)
         glass.autoresizingMask = [.width, .height]
         clip.addSubview(glass)
         window.contentView = clip
+        styleObserver = NotificationCenter.default.addObserver(forName: NSScroller.preferredScrollerStyleDidChangeNotification,
+                                                               object: nil, queue: .main) { [weak self] _ in
+            self?.scroll.scrollerStyle = .overlay
+        }
     }
 
     var isShown: Bool { window.isVisible }
@@ -57,24 +93,38 @@ final class MenuPanel: NSObject {
     }
 
     var contentSize: NSSize {
-        get { window.frame.size }
+        get { pageSize }
         set {
-            guard newValue != window.frame.size else { return }
-            let old = window.frame
-            let target = clamp(NSRect(x: old.midX - newValue.width / 2, y: old.maxY - newValue.height,
-                                      width: newValue.width, height: newValue.height), on: window.screen)
-            window.setFrame(target, display: true, animate: window.isVisible)
-            window.invalidateShadow()
+            pageSize = newValue
+            document.setFrameSize(newValue)
+            content.frame = NSRect(origin: .zero, size: newValue)
+            scrollToTop()
+            let target = fittedFrame(top: anchorTop ?? window.frame.maxY, screen: window.screen)
+            updateScrolling(visibleHeight: target.height)
+            targetFrame = target
+            guard target != window.frame else { return }
+            guard window.isVisible else { window.setFrame(target, display: false); return }
+            NSAnimationContext.runAnimationGroup({ c in
+                c.duration = Self.resizeDuration
+                c.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                window.animator().setFrame(target, display: true)
+            }, completionHandler: { [weak self] in self?.window.invalidateShadow() })
         }
     }
 
     func show(below button: NSStatusBarButton) {
         guard let bw = button.window else { return }
         let anchor = bw.convertToScreen(button.convert(button.bounds, to: nil))
-        let size = window.frame.size
-        let target = clamp(NSRect(x: anchor.midX - size.width / 2, y: anchor.minY - Self.gap - size.height,
-                                  width: size.width, height: size.height), on: bw.screen)
+        let top = anchor.minY - Self.gap
+        anchorTop = top
+        var target = fittedFrame(top: top, screen: bw.screen)
+        target.origin.x = anchor.midX - target.width / 2
+        target = clamp(target, on: bw.screen)
+        updateScrolling(visibleHeight: target.height)
+        scrollToTop()
+        targetFrame = target
         generation += 1
+        let opening = generation
         window.setFrame(target.offsetBy(dx: 0, dy: Self.drop), display: false)
         window.alphaValue = 0
         window.orderFrontRegardless()
@@ -84,7 +134,34 @@ final class MenuPanel: NSObject {
             c.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().setFrame(target, display: true)
             window.animator().alphaValue = 1
-        }, completionHandler: { [weak self] in self?.window.invalidateShadow() })
+        }, completionHandler: { [weak self] in
+            guard let self, self.generation == opening else { return }
+            if let settled = self.targetFrame, settled != self.window.frame { self.window.setFrame(settled, display: true) }
+            self.window.invalidateShadow()
+        })
+    }
+
+    private func fittedFrame(top: CGFloat, screen: NSScreen?) -> NSRect {
+        let old = window.frame
+        var height = pageSize.height
+        if let visible = (screen ?? NSScreen.main)?.visibleFrame {
+            height = min(height, max(top - visible.minY - Self.edge, Self.minimumHeight))
+        }
+        let frame = NSRect(x: old.midX - pageSize.width / 2, y: top - height, width: pageSize.width, height: height)
+        return clamp(frame, on: screen)
+    }
+
+    private func updateScrolling(visibleHeight: CGFloat) {
+        let overflows = pageSize.height > visibleHeight + 0.5
+        scroll.verticalScrollElasticity = overflows ? .automatic : .none
+        scroll.hasVerticalScroller = overflows
+        scroll.scrollerStyle = .overlay
+        if !overflows { scrollToTop() }
+    }
+
+    private func scrollToTop() {
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     func close() {
