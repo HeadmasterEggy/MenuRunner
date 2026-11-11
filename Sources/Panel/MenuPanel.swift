@@ -25,6 +25,7 @@ final class MenuPanel: NSObject {
     private let scroll: NSScrollView
     private var pageSize: NSSize
     private var anchorTop: CGFloat?
+    private var targetFrame: NSRect?
     private var generation = 0
     var onClose: () -> Void = {}
     var onEscape: () -> Void = {} { didSet { window.onEscape = onEscape } }
@@ -90,6 +91,7 @@ final class MenuPanel: NSObject {
             scrollToTop()
             let target = fittedFrame(top: anchorTop ?? window.frame.maxY, screen: window.screen)
             updateScrolling(visibleHeight: target.height)
+            targetFrame = target
             guard target != window.frame else { return }
             guard window.isVisible else { window.setFrame(target, display: false); return }
             NSAnimationContext.runAnimationGroup({ c in
@@ -110,7 +112,9 @@ final class MenuPanel: NSObject {
         target = clamp(target, on: bw.screen)
         updateScrolling(visibleHeight: target.height)
         scrollToTop()
+        targetFrame = target
         generation += 1
+        let opening = generation
         window.setFrame(target.offsetBy(dx: 0, dy: Self.drop), display: false)
         window.alphaValue = 0
         window.orderFrontRegardless()
@@ -120,7 +124,11 @@ final class MenuPanel: NSObject {
             c.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().setFrame(target, display: true)
             window.animator().alphaValue = 1
-        }, completionHandler: { [weak self] in self?.window.invalidateShadow() })
+        }, completionHandler: { [weak self] in
+            guard let self, self.generation == opening else { return }
+            if let settled = self.targetFrame, settled != self.window.frame { self.window.setFrame(settled, display: true) }
+            self.window.invalidateShadow()
+        })
     }
 
     private func fittedFrame(top: CGFloat, screen: NSScreen?) -> NSRect {
