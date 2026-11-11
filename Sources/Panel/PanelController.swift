@@ -15,6 +15,7 @@ final class PanelController: NSObject {
     private static let fanRowHeight: CGFloat = 25
     private static let titleBadgeWidth: CGFloat = 12
     private static let cardCornerRadius: CGFloat = 18
+    private static let headerHeight: CGFloat = 56
     private let showsFans = FanMonitor.shared.hasFans
     private var gpuTempsHeight: CGFloat { 118 + (showsFans ? Self.fanRowHeight : 0) }
 
@@ -25,7 +26,7 @@ final class PanelController: NSObject {
         detail.onUpdate = { [weak self] in self?.settle() }
     }
 
-    private struct Page { let view: NSView; let size: NSSize; let cards: [CardView] }
+    private struct Page { let view: NSView; let size: NSSize; let cards: [CardView]; var glass: [NSView] = [] }
     private var mainPage: Page!
 
     private func makePage(_ rows: [(CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)])], continuous: Set<Int> = [],
@@ -43,10 +44,17 @@ final class PanelController: NSObject {
         let glassHolder = NSView(frame: root.bounds)
         let contentLayer = NSView(frame: root.bounds)
         var cards: [CardView] = []
+        var glass: [NSView] = []
         for (i, (x, top, w, h, d, click)) in layout.enumerated() {
             let frame = NSRect(x: M + x, y: M + H - top - h, width: w, height: h)
-            glassHolder.addSubview(GlassBackground.card(frame: frame, cornerRadius: Self.cardCornerRadius))
+            let background = GlassBackground.card(frame: frame, cornerRadius: Self.cardCornerRadius)
+            glassHolder.addSubview(background)
+            glass.append(background)
             let card = CardView(frame: frame)
+            card.cornerRadius = Self.cardCornerRadius
+            card.wantsLayer = true
+            card.layerContentsPlacement = .topLeft
+            card.layerContentsRedrawPolicy = .duringViewResize
             card.drawer = d
             card.onClick = click
             card.continuous = continuous.contains(i)
@@ -56,7 +64,7 @@ final class PanelController: NSObject {
         }
         root.addSubview(GlassBackground.group(frame: root.bounds, spacing: g, content: glassHolder))
         root.addSubview(contentLayer)
-        return Page(view: root, size: size, cards: cards)
+        return Page(view: root, size: size, cards: cards, glass: glass)
     }
 
     private func build() {
@@ -70,7 +78,9 @@ final class PanelController: NSObject {
         menuPanel.onClose = { [weak self] in self?.panelDidClose() }
         menuPanel.onEscape = { [weak self] in self?.hide() }
         PanelLayout.shared.onChange = { [weak self] in self?.layoutChanged() }
-        cardDrag.onMove = { from, to in PanelLayout.shared.move(from, onto: to) }
+        cardDrag.frames = { [weak self] order in self?.mainFrames(order) ?? [:] }
+        cardDrag.onCommit = { PanelLayout.shared.reorderVisible($0) }
+        cardDrag.onAnimate = { [weak self] in self?.settle() }
     }
 
     private let cardDrag = CardDragController()
@@ -105,7 +115,7 @@ final class PanelController: NSObject {
     private func makeMainPage() -> Page {
         let W = Self.width, g = Self.gap, half = (W - g) / 2
         var rows: [(CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)])] = [
-            (56, [(0, W, { [weak self] w in self?.drawHeader(w) }, { [weak self] in self?.showDetail(.system) })])
+            (Self.headerHeight, [(0, W, { [weak self] w in self?.drawHeader(w) }, { [weak self] in self?.showDetail(.system) })])
         ]
         var kinds: [PanelCard?] = [nil]
         for row in PanelLayout.shared.rows {
@@ -128,10 +138,26 @@ final class PanelController: NSObject {
             card.addSubview(b)
         })
         page.view.autoresizingMask = [.minYMargin]
-        cardDrag.attach(cards: page.cards, kinds: kinds)
+        cardDrag.attach(cards: page.cards, glass: page.glass, kinds: kinds)
         mainKinds = kinds
         mainNeedsRebuild = false
         return page
+    }
+
+    private func mainFrames(_ visible: [PanelCard]) -> [PanelCard: NSRect] {
+        let W = Self.width, g = Self.gap, M = Self.margin, half = (W - g) / 2
+        let pageHeight = mainPage.size.height
+        var frames: [PanelCard: NSRect] = [:]
+        var top = Self.headerHeight + g
+        for row in PanelLayout.rows(for: visible) {
+            let h = row.map(height).max() ?? 0
+            for (i, card) in row.enumerated() {
+                frames[card] = NSRect(x: M + CGFloat(i) * (half + g), y: pageHeight - M - top - h,
+                                      width: row.count == 2 ? half : W, height: h)
+            }
+            top += h + g
+        }
+        return frames
     }
 
     private func layoutChanged() {

@@ -9,7 +9,7 @@ final class CardView: NSView {
     var drawer: (CGFloat) -> Void = { _ in }
     var onClick: (() -> Void)?
     var onDrag: ((CardView, CardDragController.Phase, NSPoint) -> Void)?
-    var isDropTarget = false { didSet { if isDropTarget != oldValue { needsDisplay = true } } }
+    var cornerRadius: CGFloat = 18
     private static let dragThreshold: CGFloat = 4
     private var downPoint: NSPoint?
     private var dragging = false
@@ -71,14 +71,6 @@ final class CardView: NSView {
         if hovered || pressed {
             NSColor.labelColor.withAlphaComponent(pressed ? 0.12 : 0.05).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 18, yRadius: 18).fill()
-        }
-        if isDropTarget {
-            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 17, yRadius: 17)
-            ring.lineWidth = 3
-            NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
-            ring.fill()
-            NSColor.controlAccentColor.setStroke()
-            ring.stroke()
         }
         CardView.drawingHover = rowAt != nil ? hoverPoint : nil
         CardView.drawingHeight = bounds.height

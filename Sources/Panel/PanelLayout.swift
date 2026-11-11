@@ -22,7 +22,9 @@ final class PanelLayout: ObservableObject {
 
     var isDefault: Bool { order == PanelCard.allCases && hidden.isEmpty }
 
-    var rows: [[PanelCard]] {
+    var rows: [[PanelCard]] { Self.rows(for: visible) }
+
+    static func rows(for visible: [PanelCard]) -> [[PanelCard]] {
         var rows: [[PanelCard]] = []
         var waiting: PanelCard?
         for card in visible {
@@ -48,6 +50,14 @@ final class PanelLayout: ObservableObject {
     func move(_ card: PanelCard, onto target: PanelCard) {
         guard card != target, let from = order.firstIndex(of: card), let to = order.firstIndex(of: target) else { return }
         order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        save()
+    }
+
+    func reorderVisible(_ cards: [PanelCard]) {
+        var next = cards.makeIterator()
+        let reordered = order.map { hidden.contains($0) ? $0 : (next.next() ?? $0) }
+        guard reordered != order, Set(reordered).count == order.count else { return }
+        order = reordered
         save()
     }
 
