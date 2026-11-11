@@ -15,6 +15,7 @@ final class PanelController: NSObject {
     private static let fanRowHeight: CGFloat = 25
     private static let titleBadgeWidth: CGFloat = 12
     private static let cardCornerRadius: CGFloat = 18
+    private static let headerHeight: CGFloat = 56
     private let showsFans = FanMonitor.shared.hasFans
     private var gpuTempsHeight: CGFloat { 118 + (showsFans ? Self.fanRowHeight : 0) }
 
@@ -25,7 +26,7 @@ final class PanelController: NSObject {
         detail.onUpdate = { [weak self] in self?.settle() }
     }
 
-    private struct Page { let view: NSView; let size: NSSize; let cards: [CardView] }
+    private struct Page { let view: NSView; let size: NSSize; let cards: [CardView]; var glass: [NSView] = [] }
     private var mainPage: Page!
 
     private func makePage(_ rows: [(CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)])], continuous: Set<Int> = [],
@@ -43,10 +44,17 @@ final class PanelController: NSObject {
         let glassHolder = NSView(frame: root.bounds)
         let contentLayer = NSView(frame: root.bounds)
         var cards: [CardView] = []
+        var glass: [NSView] = []
         for (i, (x, top, w, h, d, click)) in layout.enumerated() {
             let frame = NSRect(x: M + x, y: M + H - top - h, width: w, height: h)
-            glassHolder.addSubview(GlassBackground.card(frame: frame, cornerRadius: Self.cardCornerRadius))
+            let background = GlassBackground.card(frame: frame, cornerRadius: Self.cardCornerRadius)
+            glassHolder.addSubview(background)
+            glass.append(background)
             let card = CardView(frame: frame)
+            card.cornerRadius = Self.cardCornerRadius
+            card.wantsLayer = true
+            card.layerContentsPlacement = .topLeft
+            card.layerContentsRedrawPolicy = .duringViewResize
             card.drawer = d
             card.onClick = click
             card.continuous = continuous.contains(i)
@@ -56,21 +64,90 @@ final class PanelController: NSObject {
         }
         root.addSubview(GlassBackground.group(frame: root.bounds, spacing: g, content: glassHolder))
         root.addSubview(contentLayer)
-        return Page(view: root, size: size, cards: cards)
+        return Page(view: root, size: size, cards: cards, glass: glass)
     }
 
     private func build() {
+        mainPage = makeMainPage()
+        cards = mainPage.cards
+        host = NSView(frame: NSRect(origin: .zero, size: mainPage.size))
+        host.addSubview(mainPage.view)
+        current = mainPage.view
+        menuPanel = MenuPanel(content: host, size: mainPage.size)
+        if CommandLine.arguments.contains("--light") { menuPanel.appearance = NSAppearance(named: .aqua) }
+        menuPanel.onClose = { [weak self] in self?.panelDidClose() }
+        menuPanel.onEscape = { [weak self] in self?.hide() }
+        PanelLayout.shared.onChange = { [weak self] in self?.layoutChanged() }
+        cardDrag.frames = { [weak self] order in self?.mainFrames(order) ?? [:] }
+        cardDrag.onCommit = { PanelLayout.shared.reorderVisible($0) }
+        cardDrag.onAnimate = { [weak self] in self?.settle() }
+    }
+
+    private let cardDrag = CardDragController()
+
+    private var mainKinds: [PanelCard?] = []
+    private var mainNeedsRebuild = false
+
+    private lazy var compact = CompactCards(model: model)
+
+    private func height(_ card: PanelCard, narrow: Bool) -> CGFloat {
+        switch card {
+        case .cpu: return narrow ? CompactCards.cpuHeight : 134
+        case .gpu, .temps: return gpuTempsHeight
+        case .memory: return narrow ? CompactCards.memoryHeight : 84
+        case .storage, .battery: return 138
+        case .network: return narrow ? CompactCards.networkHeight : 96
+        case .power: return narrow ? CompactCards.powerHeight : PowerCards.mainHeight
+        }
+    }
+
+    private func rowHeight(_ row: [PanelCard]) -> CGFloat {
+        row.map { height($0, narrow: row.count == 2) }.max() ?? 0
+    }
+
+    private func drawer(_ card: PanelCard) -> (CGFloat) -> Void {
+        switch card {
+        case .cpu: return { [weak self] w in
+            guard let self else { return }
+            if CompactCards.fits(w) { self.compact.cpu(w, height: CardView.drawingHeight) } else { self.drawCPU(w) }
+        }
+        case .gpu: return { [weak self] w in self?.drawGPU(w) }
+        case .temps: return { [weak self] w in self?.drawTemps(w) }
+        case .memory: return { [weak self] w in
+            guard let self else { return }
+            if CompactCards.fits(w) { self.compact.memory(w, pressure: self.memoryPressure) } else { self.drawMemory(w) }
+        }
+        case .storage: return { [weak self] w in self?.drawStorage(w) }
+        case .battery: return { [weak self] w in self?.drawBattery(w) }
+        case .network: return { [weak self] w in
+            guard let self else { return }
+            if CompactCards.fits(w) { self.compact.network(w, height: CardView.drawingHeight) } else { self.drawNetwork(w) }
+        }
+        case .power: return { [weak self] w in
+            guard let self else { return }
+            let recorder = PowerRecorder.shared
+            if CompactCards.fits(w) { self.compact.power(w, apps: Array(recorder.liveApps.prefix(3)), watts: recorder.liveWatts) } else { self.power.drawMain(w) }
+        }
+        }
+    }
+
+    private func makeMainPage() -> Page {
         let W = Self.width, g = Self.gap, half = (W - g) / 2
-        mainPage = makePage([
-            (56,  [(0, W, drawHeader, { [weak self] in self?.showDetail(.system) })]),
-            (134, [(0, W, drawCPU, { [weak self] in self?.showDetail(.cpu) })]),
-            (gpuTempsHeight, [(0, half, drawGPU, { [weak self] in self?.showDetail(.gpu) }), (half + g, half, drawTemps, { [weak self] in self?.showDetail(.temps) })]),
-            (84,  [(0, W, drawMemory, { [weak self] in self?.showDetail(.memory) })]),
-            (138, [(0, half, drawStorage, { [weak self] in self?.showDetail(.storage) }), (half + g, half, drawBattery, { [weak self] in self?.showDetail(.battery) })]),
-            (96,  [(0, W, drawNetwork, { [weak self] in self?.showDetail(.network) })]),
-            (PowerCards.mainHeight, [(0, W, power.drawMain, { [weak self] in self?.showDetail(.power) })]),
-        ], continuous: [1, 2, 7],
-           button: { [weak self] card, w in
+        var rows: [(CGFloat, [(CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?)])] = [
+            (Self.headerHeight, [(0, W, { [weak self] w in self?.drawHeader(w) }, { [weak self] in self?.showDetail(.system) })])
+        ]
+        var kinds: [PanelCard?] = [nil]
+        for row in PanelLayout.shared.rows {
+            let width = row.count == 2 ? half : W
+            let items = row.enumerated().map { i, card -> (CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?) in
+                let kind = card.detailKind
+                return (CGFloat(i) * (half + g), width, drawer(card), { [weak self] in self?.showDetail(kind) })
+            }
+            rows.append((rowHeight(row), items))
+            kinds += row.map { Optional($0) }
+        }
+        let continuous = Set(kinds.indices.filter { kinds[$0]?.animatesContinuously == true })
+        let page = makePage(rows, continuous: continuous, button: { [weak self] card, w in
             guard let self else { return }
             let b = NSButton(image: NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")!,
                              target: self, action: #selector(self.settingsClicked(_:)))
@@ -79,15 +156,52 @@ final class PanelController: NSObject {
             b.frame = NSRect(x: w - 38, y: 16, width: 24, height: 24)
             card.addSubview(b)
         })
+        page.view.autoresizingMask = [.minYMargin]
+        cardDrag.attach(cards: page.cards, glass: page.glass, kinds: kinds)
+        mainKinds = kinds
+        mainNeedsRebuild = false
+        return page
+    }
+
+    private func mainFrames(_ visible: [PanelCard]) -> [PanelCard: NSRect] {
+        let W = Self.width, g = Self.gap, M = Self.margin, half = (W - g) / 2
+        let pageHeight = mainPage.size.height
+        var frames: [PanelCard: NSRect] = [:]
+        var top = Self.headerHeight + g
+        for row in PanelLayout.shared.rows(for: visible) {
+            let h = rowHeight(row)
+            for (i, card) in row.enumerated() {
+                frames[card] = NSRect(x: M + CGFloat(i) * (half + g), y: pageHeight - M - top - h,
+                                      width: row.count == 2 ? half : W, height: h)
+            }
+            top += h + g
+        }
+        return frames
+    }
+
+    private func layoutChanged() {
+        guard current === mainPage.view else { mainNeedsRebuild = true; return }
+        let visible = PanelLayout.shared.visible
+        cardDrag.animate(to: mainFrames(visible)) { [weak self] in self?.rebuildMain() }
+    }
+
+    private func rebuildMain() {
+        guard current === mainPage.view else { mainNeedsRebuild = true; return }
+        switchGeneration += 1
+        let old = mainPage.view
+        mainPage = makeMainPage()
         cards = mainPage.cards
-        host = NSView(frame: NSRect(origin: .zero, size: mainPage.size))
-        mainPage.view.autoresizingMask = [.minYMargin]
+        host.setFrameSize(mainPage.size)
+        old.removeFromSuperview()
+        mainPage.view.setFrameOrigin(.zero)
         host.addSubview(mainPage.view)
         current = mainPage.view
-        menuPanel = MenuPanel(content: host, size: mainPage.size)
-        if CommandLine.arguments.contains("--light") { menuPanel.appearance = NSAppearance(named: .aqua) }
-        menuPanel.onClose = { [weak self] in self?.panelDidClose() }
-        menuPanel.onEscape = { [weak self] in self?.hide() }
+        menuPanel.contentSize = mainPage.size
+        settle()
+    }
+
+    private var batteryCard: CardView? {
+        mainKinds.firstIndex(of: .battery).flatMap { $0 < mainPage.cards.count ? mainPage.cards[$0] : nil }
     }
 
     static let procRows = 8, topProcRows = 10
@@ -221,6 +335,7 @@ final class PanelController: NSObject {
     @objc private func backToMain() {
         detailTimer?.invalidate(); detailTimer = nil
         detail.stopNetwork()
+        if mainNeedsRebuild { mainPage = makeMainPage() }
         switchTo(mainPage, forward: false, animated: menuPanel.isShown)
     }
 
@@ -530,7 +645,7 @@ final class PanelController: NSObject {
         model.tick(dt: now - lastTick); lastTick = now
         let settling = now < settleUntil
         for c in cards where c.continuous || settling { c.needsDisplay = true }
-        if onMainPage, model.battery?.state == "charging", mainPage.cards.count > 6 { mainPage.cards[6].needsDisplay = true }
+        if onMainPage, model.battery?.state == "charging" { batteryCard?.needsDisplay = true }
     }
 
     func redrawAll() { cards.forEach { $0.needsDisplay = true; $0.displayIfNeeded() } }
@@ -576,7 +691,7 @@ final class PanelController: NSObject {
         if let mem = gpuMemory {
             Draw.text(L("显存 ", "GPU mem ") + SystemInfo.gb(mem), NSPoint(x: 14, y: 28), size: 10, color: .glassSecondary)
         }
-        let chart = NSRect(x: 14, y: 44, width: w - 28, height: gpuTempsHeight - 58)
+        let chart = NSRect(x: 14, y: 44, width: w - 28, height: max(CardView.drawingHeight, gpuTempsHeight) - 58)
         Draw.chartBackground(chart)
         Draw.area(chart, m.gpuHistory, scroll: m.scroll, color: .systemGreen, dot: true)
     }
