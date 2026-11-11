@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MenuRunner</title>
+<meta name="description" content="A tiny macOS menu bar runner and Liquid Glass system monitor. CPU, GPU, memory, temperatures, fan speed, power usage and AI power analysis.">
+<meta name="theme-color" content="#0b0d12">
+<meta property="og:title" content="MenuRunner">
+<meta property="og:description" content="A tiny macOS menu bar runner and Liquid Glass system monitor.">
+<meta property="og:image" content="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Noto+Sans+SC:wght@400;500;700;900&display=swap">
+<link rel="stylesheet" href="site/motion.css">
+<link rel="stylesheet" href="site/style.css">
+<link rel="stylesheet" href="site/live.css">
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="cursor-glow" id="cursor-glow"></div>
+<div class="glows"><div class="glow glow-a" data-parallax="0.04"></div><div class="glow glow-b" data-parallax="-0.06"></div></div>
+
+<header class="nav">
+  <a class="brand" href="#top"><img src="icon.png" alt="" width="28" height="28"><span>MenuRunner</span></a>
+  <nav class="nav-links">
+    <a href="#runners" data-i18n="nav.runners">Runners</a>
+    <a href="#features" data-i18n="nav.features">Features</a>
+    <a href="#ai" data-i18n="nav.ai">AI analysis</a>
+    <a href="#install" data-i18n="nav.install">Install</a>
+  </nav>
+  <div class="nav-actions">
+    <button class="lang" id="lang-toggle" type="button">中文</button>
+    <a class="gh" href="https://github.com/HeadmasterEggy/MenuRunner" aria-label="GitHub">
+      <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow" data-i18n="hero.eyebrow">Free and open source · macOS 14+ · Apple Silicon</p>
+      <h1 class="hero-title"><span data-i18n="hero.pre">Your Mac's</span> <span class="rotator" id="rotator"><span class="word">vital signs</span></span><span class="br"></span><span data-i18n="hero.post">in the menu bar.</span></h1>
+      <p class="lead" data-i18n="hero.lead">A tiny animated runner that speeds up as your Mac works harder, and a Liquid Glass panel with CPU, GPU, memory, temperatures, fans, battery, network and power, one click away.</p>
+      <div class="cta">
+        <a class="btn primary" id="download" href="https://github.com/HeadmasterEggy/MenuRunner/releases/latest">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a1 1 0 011 1v9.59l3.3-3.3a1 1 0 111.4 1.42l-5 5a1 1 0 01-1.4 0l-5-5a1 1 0 111.4-1.42l3.3 3.3V4a1 1 0 011-1zM5 19a1 1 0 100 2h14a1 1 0 100-2H5z"/></svg>
+          <span data-i18n="hero.download">Download for Mac</span>
+          <span class="shine"></span>
+        </a>
+        <a class="btn ghost" href="https://github.com/HeadmasterEggy/MenuRunner" data-i18n="hero.source">View on GitHub</a>
+      </div>
+      <p class="version" id="version-line"><span data-i18n="hero.latest">Latest release</span> <strong id="version">v1.9</strong></p>
+    </div>
+
+    <div class="hero-stage" data-tilt="6">
+      <div class="menubar">
+        <div class="menubar-left">
+          <svg viewBox="0 0 14 17" width="13" height="16" aria-hidden="true"><path fill="currentColor" d="M11.6 9c0-2 1.7-3 1.8-3.1-1-1.4-2.5-1.6-3-1.6-1.3-.1-2.5.8-3.1.8-.7 0-1.6-.8-2.7-.7C3.2 4.4 1.9 5.2 1.2 6.5c-1.5 2.6-.4 6.4 1 8.5.7 1 1.5 2.1 2.6 2.1 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.6 1.1 0 1.8-1 2.5-2 .8-1.1 1.1-2.2 1.1-2.3 0 0-2.2-.8-2.2-3.7zM9.6 3c.6-.7 1-1.7.9-2.7-.8 0-1.9.6-2.5 1.3-.5.6-1 1.6-.9 2.6.9.1 1.9-.5 2.5-1.2z"/></svg>
+          <strong>Finder</strong><span>File</span><span>Edit</span><span>View</span>
+        </div>
+        <div class="menubar-right">
+          <button class="runner-chip" id="hero-runner" type="button" aria-label="MenuRunner">
+            <canvas id="hero-canvas" width="44" height="22"></canvas>
+          </button>
+          <span class="mb-metric"><canvas id="hero-spark" width="34" height="14"></canvas><b id="hero-cpu">23%</b></span>
+          <span class="mb-dim">Wi‑Fi</span>
+          <span class="mb-dim" id="hero-clock">Tue 9:41</span>
+        </div>
+      </div>
+      <div class="hero-panel" id="hero-panel">
+        <img data-src-en="panel.png" data-src-zh="zh/panel.png" src="panel.png" alt="MenuRunner panel" width="386" height="722">
+      </div>
+      <div class="chip-float" data-depth="18" style="--x: 6%; --y: 22%"><i class="dot dot-blue"></i><span>CPU</span><b data-live="cpu">23%</b></div>
+      <div class="chip-float" data-depth="30" style="--x: 4%; --y: 58%"><i class="dot dot-orange"></i><span>SoC</span><b data-live="temp">47.6°C</b></div>
+      <div class="chip-float" data-depth="24" style="--x: 74%; --y: 40%"><i class="dot dot-yellow"></i><span data-i18n="score.power">Power</span><b data-live="power">13.2 W</b></div>
+      <div class="chip-float" data-depth="12" style="--x: 70%; --y: 76%"><i class="dot dot-green"></i><span>↓</span><b data-live="net">1.6 MB/s</b></div>
+      <div class="stage-foot">
+        <span class="hint" data-i18n="hero.hint">Click the runner in the menu bar</span>
+        <div class="picker" id="hero-picker"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="stats reveal">
+    <div class="stat"><b data-count="11">0</b><span data-i18n="stats.runners">original runners</span></div>
+    <div class="stat"><b data-count="60">0</b><span data-i18n="stats.fps">fps glass panel</span></div>
+    <div class="stat"><b data-count="14">0</b><span data-i18n="stats.days">days of power history</span></div>
+    <div class="stat"><b data-count="6" data-suffix=" h">0</b><span data-i18n="stats.update">between update checks</span></div>
+  </section>
+
+  <div class="marquee" aria-hidden="true"><div class="marquee-track" id="marquee"></div></div>
+
+  <section class="section" id="runners">
+    <div class="section-head reveal">
+      <p class="eyebrow" data-i18n="runners.eyebrow">Runners</p>
+      <h2 data-i18n="runners.title">The busier your Mac, the faster it runs.</h2>
+      <p class="sub" data-i18n="runners.sub">Eleven original runners drawn in code. Each one follows CPU, GPU or memory usage in three clearly different levels. Try it:</p>
+    </div>
+    <div class="playground">
+      <div class="play-top">
+      <div class="load-control" role="radiogroup" aria-label="Load">
+        <button type="button" data-level="0" class="active" data-i18n="runners.low">Idle</button>
+        <button type="button" data-level="1" data-i18n="runners.mid">Busy</button>
+        <button type="button" data-level="2" data-i18n="runners.high">Flat out</button>
+      </div>
+      <label class="slider"><span data-i18n="runners.load">Load</span><input type="range" id="load-slider" min="0" max="100" value="15"><b id="load-value">15%</b></label>
+      </div>
+      <div class="runner-grid" id="runner-grid"></div>
+      <p class="play-hint" data-i18n="runners.hint">Tip: click a runner to put it in the menu bar up top.</p>
+    </div>
+    <figure class="sheet reveal" id="sheet">
+      <img src="runners.png" alt="All runners" loading="lazy" width="3600" height="1936">
+      <figcaption data-i18n="runners.caption">Coffee cup, Rocket Cat, fan, heartbeat, sound bars, hourglass, lava lamp, DNA helix, radar, bouncing ball and clock. The monochrome ones adapt to light and dark menu bars.</figcaption>
+    </figure>
+  </section>
+
+  <section class="section" id="features">
+    <div class="section-head reveal">
+      <p class="eyebrow" data-i18n="features.eyebrow">Features</p>
+      <h2 data-i18n="features.title">Everything about your Mac, in one glass panel.</h2>
+    </div>
+    <div class="features">
+      <article class="card reveal"><div class="ic ic-blue">◧</div><canvas class="viz" data-viz="spark"></canvas><h3 data-i18n="f.menubar.t">Menu bar metrics</h3><p data-i18n="f.menubar.d">CPU, GPU, memory, battery, network, temperature and fan speed with live mini graphs. Graph, number, or both.</p></article>
+      <article class="card reveal"><div class="ic ic-purple">◎</div><canvas class="viz" data-viz="ring"></canvas><h3 data-i18n="f.panel.t">Liquid Glass panel</h3><p data-i18n="f.panel.d">Machine spec, CPU and GPU history, memory breakdown, storage, battery health and network, animated at 60 fps.</p></article>
+      <article class="card reveal"><div class="ic ic-green">↘</div><canvas class="viz" data-viz="cores"></canvas><h3 data-i18n="f.detail.t">Click for details</h3><p data-i18n="f.detail.d">Per-core CPU, top apps by CPU, GPU, memory and traffic, every temperature sensor, all volumes and full battery info.</p></article>
+      <article class="card reveal"><div class="ic ic-orange">✺</div><canvas class="viz" data-viz="temp"></canvas><h3 data-i18n="f.thermal.t">Temperatures and fans</h3><p data-i18n="f.thermal.d">SoC, battery and SSD temperatures plus each fan's RPM, read without root. Fanless Macs simply hide the fan row.</p></article>
+      <article class="card reveal"><div class="ic ic-yellow">ϟ</div><canvas class="viz" data-viz="power"></canvas><h3 data-i18n="f.power.t">Power usage</h3><p data-i18n="f.power.d">Whole-system watts and the apps drawing the most power, with a 24-hour chart and 14 days of history.</p></article>
+      <article class="card reveal"><div class="ic ic-red">↻</div><canvas class="viz" data-viz="update"></canvas><h3 data-i18n="f.update.t">Updates itself</h3><p data-i18n="f.update.d">Checks GitHub Releases every 6 hours, installs the new version in place and relaunches. English and Simplified Chinese.</p></article>
+    </div>
+    <div class="gallery">
+      <figure class="reveal" data-tilt="8"><img data-src-en="cpu.png" data-src-zh="zh/cpu.png" src="cpu.png" alt="CPU details" loading="lazy" width="386" height="540"><figcaption data-i18n="g.cpu">CPU details</figcaption></figure>
+      <figure class="reveal" data-tilt="8"><img data-src-en="memory.png" data-src-zh="zh/memory.png" src="memory.png" alt="Memory by app" loading="lazy" width="386" height="754"><figcaption data-i18n="g.memory">Memory by app</figcaption></figure>
+      <figure class="reveal" data-tilt="8"><img data-src-en="settings.png" data-src-zh="zh/settings.png" src="settings.png" alt="Settings" loading="lazy" width="432" height="758"><figcaption data-i18n="g.settings">Settings</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="section ai" id="ai">
+    <div class="ai-copy reveal">
+      <p class="eyebrow" data-i18n="ai.eyebrow">AI power analysis</p>
+      <h2 data-i18n="ai.title">Find out what is draining your battery.</h2>
+      <p class="sub" data-i18n="ai.sub">MenuRunner records per-app energy and system stats in 5-minute buckets. One click sends a summary to Claude or any OpenAI-compatible endpoint and tells you what to change.</p>
+      <ul class="checks">
+        <li data-i18n="ai.l1">Health score across power, CPU, GPU, memory, thermals, battery and network</li>
+        <li data-i18n="ai.l2">Top apps by energy, CPU and memory over 24 hours to 14 days</li>
+        <li data-i18n="ai.l3">Works with Claude, OpenAI, DeepSeek or a local Ollama</li>
+        <li data-i18n="ai.l4">API keys stay on your Mac, readable only by your account</li>
+      </ul>
+    </div>
+    <div class="ai-shot reveal">
+      <div class="ai-frame" data-tilt="5"><img src="site/ai-analysis.jpg" alt="AI System Analysis window" loading="lazy" width="848" height="704"></div>
+      <div class="score-card" id="score-card">
+        <div class="score-ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34" class="track"/><circle cx="40" cy="40" r="34" class="fill" id="score-fill"/></svg><b id="score-num">0</b></div>
+        <div class="score-bars">
+          <div><span data-i18n="score.power">Power</span><i style="--v: 72%"></i></div>
+          <div><span data-i18n="score.cpu">CPU</span><i style="--v: 82%"></i></div>
+          <div><span data-i18n="score.memory">Memory</span><i class="warn" style="--v: 50%"></i></div>
+          <div><span data-i18n="score.thermal">Thermal</span><i style="--v: 82%"></i></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="install">
+    <div class="section-head reveal">
+      <p class="eyebrow" data-i18n="install.eyebrow">Install</p>
+      <h2 data-i18n="install.title">Up and running in a minute.</h2>
+    </div>
+    <ol class="steps">
+      <li class="reveal"><span class="num">1</span><div><h3 data-i18n="install.s1t">Download the DMG</h3><p data-i18n="install.s1d">Grab the latest MenuRunner DMG from GitHub Releases.</p><a class="btn primary small" href="https://github.com/HeadmasterEggy/MenuRunner/releases/latest" data-i18n="hero.download">Download for Mac</a></div></li>
+      <li class="reveal"><span class="num">2</span><div><h3 data-i18n="install.s2t">Drag to Applications</h3><p data-i18n="install.s2d">Open the DMG and drag MenuRunner into your Applications folder.</p></div></li>
+      <li class="reveal"><span class="num">3</span><div><h3 data-i18n="install.s3t">Allow it to open</h3><p data-i18n="install.s3d">The app is not notarized. Click Open Anyway in System Settings → Privacy &amp; Security, or run:</p>
+        <div class="code"><code id="xattr-cmd" data-full="xattr -dr com.apple.quarantine /Applications/MenuRunner.app"><span class="prompt">$</span> <span id="xattr-text">xattr -dr com.apple.quarantine /Applications/MenuRunner.app</span><span class="caret"></span></code><button type="button" id="copy-btn" data-i18n="install.copy">Copy</button></div></div></li>
+    </ol>
+    <p class="note" data-i18n="install.note">Left-click the menu bar icon to open the panel. Right-click it, or use the gear button, for settings.</p>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="brand"><img src="icon.png" alt="" width="22" height="22"><span>MenuRunner</span></div>
+  <p data-i18n="footer.text">Made for macOS 14 Sonoma and later on Apple Silicon. Liquid Glass on macOS 26.</p>
+  <a href="https://github.com/HeadmasterEggy/MenuRunner">GitHub</a>
+</footer>
+
+<script src="site/i18n.js"></script>
+<script src="site/runners.js"></script>
+<script src="site/main.js"></script>
+<script src="site/effects.js"></script>
+<script src="site/live.js"></script>
+</body>
+</html>
