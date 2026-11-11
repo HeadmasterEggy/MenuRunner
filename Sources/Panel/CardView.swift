@@ -20,26 +20,43 @@ final class CardView: NSView {
     }
     override func mouseDown(with event: NSEvent) {
         downPoint = pointInSuperview(event)
+        dragging = false
         if onClick != nil { pressed = true }
     }
     override func mouseDragged(with event: NSEvent) {
-        guard let onDrag, let start = downPoint else { return }
+        guard let onDrag, let start = downPoint, !dragging else { return }
         let p = pointInSuperview(event)
-        if !dragging, hypot(p.x - start.x, p.y - start.y) > Self.dragThreshold {
-            dragging = true
-            pressed = false
-            hovered = false
-            onDrag(self, .began, start)
+        guard hypot(p.x - start.x, p.y - start.y) > Self.dragThreshold else { return }
+        dragging = true
+        pressed = false
+        hovered = false
+        downPoint = nil
+        onDrag(self, .began, start)
+        onDrag(self, .moved, p)
+        trackDrag(onDrag)
+    }
+    private func trackDrag(_ onDrag: @escaping (CardView, CardDragController.Phase, NSPoint) -> Void) {
+        guard let window else { finishDrag(onDrag, at: downPoint ?? .zero); return }
+        window.trackEvents(matching: [.leftMouseDragged, .leftMouseUp], timeout: NSEvent.foreverDuration, mode: .eventTracking) { [weak self] event, stop in
+            guard let self, let event else { stop.pointee = true; return }
+            let p = self.pointInSuperview(event)
+            if event.type == .leftMouseUp {
+                self.finishDrag(onDrag, at: p)
+                stop.pointee = true
+            } else {
+                onDrag(self, .moved, p)
+            }
         }
-        if dragging { onDrag(self, .moved, p) }
+        if dragging { finishDrag(onDrag, at: downPoint ?? .zero) }
+    }
+    private func finishDrag(_ onDrag: (CardView, CardDragController.Phase, NSPoint) -> Void, at point: NSPoint) {
+        guard dragging else { return }
+        dragging = false
+        onDrag(self, .ended, point)
     }
     override func mouseUp(with event: NSEvent) {
         downPoint = nil
-        if dragging {
-            dragging = false
-            onDrag?(self, .ended, pointInSuperview(event))
-            return
-        }
+        guard !dragging else { return }
         let p = convert(event.locationInWindow, from: nil)
         let inside = bounds.contains(p)
         pressed = false

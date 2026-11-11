@@ -14,6 +14,7 @@ final class CardDragController {
     private static let dropDuration = 0.36
     private static let liftDuration = 0.18
     private static let timing = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
+    private static let liftedZ: CGFloat = 10
     private static let liftAlpha: CGFloat = 0.94
     private static let shadowOpacity: Float = 0.3
     private static let shadowRadius: CGFloat = 16
@@ -32,6 +33,8 @@ final class CardDragController {
     var onAnimate: () -> Void = {}
 
     func attach(cards: [CardView], glass: [NSView], kinds: [PanelCard?]) {
+        if dragged != nil { NSCursor.pop() }
+        dragged = nil
         slots = cards.indices.compactMap { i in
             guard let kind = kinds[i] else { return nil }
             return Slot(card: cards[i], glass: i < glass.count ? glass[i] : nil, kind: kind)
@@ -57,7 +60,7 @@ final class CardDragController {
         targets = frames(order)
         lastSwapped = nil
         grabOffset = NSPoint(x: point.x - card.frame.minX, y: point.y - card.frame.minY)
-        card.superview?.addSubview(card)
+        card.layer?.zPosition = Self.liftedZ
         lift(card, true)
         NSCursor.closedHand.push()
     }
@@ -93,6 +96,7 @@ final class CardDragController {
             }
             self.lift(card, false)
         }, completion: { [weak self] in
+            card.layer?.zPosition = 0
             guard let self, changed else { return }
             self.onCommit(finalOrder)
         })
