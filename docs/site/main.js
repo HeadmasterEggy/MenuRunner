@@ -35,6 +35,7 @@
       img.src = lang === "zh" ? img.dataset.srcZh : img.dataset.srcEn;
     });
     document.getElementById("lang-toggle").textContent = t("lang.switch");
+    document.dispatchEvent(new CustomEvent("mr:lang", { detail: { lang, t } }));
     updateClock();
   }
 
@@ -77,7 +78,7 @@
   function setupCopy() {
     const btn = document.getElementById("copy-btn");
     btn.addEventListener("click", () => {
-      const text = document.getElementById("xattr-cmd").textContent;
+      const text = document.getElementById("xattr-cmd").dataset.full;
       const done = () => {
         btn.textContent = t("install.copied");
         btn.classList.add("copied");
@@ -168,7 +169,7 @@
       tile.append(bar, label);
       tile.addEventListener("click", () => setHeroRunner(i));
       grid.appendChild(tile);
-      const h = 30;
+      const h = 40;
       const w = Math.round(h * runner.aspect);
       return { runner, ctx: prepareCanvas(canvas, w, h), w, h, phase: Math.random() * 10 };
     });
@@ -208,6 +209,9 @@
     const r = el.getBoundingClientRect();
     return r.bottom > 0 && r.top < window.innerHeight;
   }
+
+  window.MR_T = t;
+  window.MR_getLang = () => lang;
 
   function start() {
     applyLang();
