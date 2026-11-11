@@ -25,7 +25,7 @@ struct PanelCardsSection: View {
         } header: {
             Text(L("面板卡片", "Panel Cards"))
         } footer: {
-            Text(L("拖动调整顺序，关闭开关可隐藏卡片", "Drag to reorder. Turn a card off to hide it."))
+            Text(L("在面板上直接拖动卡片，或在这里拖动调整顺序；关闭开关可隐藏卡片", "Drag cards right in the panel, or drag rows here, to reorder. Turn a card off to hide it."))
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

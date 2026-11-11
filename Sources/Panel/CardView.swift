@@ -8,10 +8,38 @@ final class CardView: NSView {
     static var drawingHeight: CGFloat = 0
     var drawer: (CGFloat) -> Void = { _ in }
     var onClick: (() -> Void)?
+    var onDrag: ((CardView, CardDragController.Phase, NSPoint) -> Void)?
+    var isDropTarget = false { didSet { if isDropTarget != oldValue { needsDisplay = true } } }
+    private static let dragThreshold: CGFloat = 4
+    private var downPoint: NSPoint?
+    private var dragging = false
     private var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }
     private var pressed = false { didSet { if pressed != oldValue { needsDisplay = true } } }
-    override func mouseDown(with event: NSEvent) { if onClick != nil { pressed = true } }
+    private func pointInSuperview(_ event: NSEvent) -> NSPoint {
+        superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+    }
+    override func mouseDown(with event: NSEvent) {
+        downPoint = pointInSuperview(event)
+        if onClick != nil { pressed = true }
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let onDrag, let start = downPoint else { return }
+        let p = pointInSuperview(event)
+        if !dragging, hypot(p.x - start.x, p.y - start.y) > Self.dragThreshold {
+            dragging = true
+            pressed = false
+            hovered = false
+            onDrag(self, .began, start)
+        }
+        if dragging { onDrag(self, .moved, p) }
+    }
     override func mouseUp(with event: NSEvent) {
+        downPoint = nil
+        if dragging {
+            dragging = false
+            onDrag?(self, .ended, pointInSuperview(event))
+            return
+        }
         let p = convert(event.locationInWindow, from: nil)
         let inside = bounds.contains(p)
         pressed = false
@@ -43,6 +71,14 @@ final class CardView: NSView {
         if hovered || pressed {
             NSColor.labelColor.withAlphaComponent(pressed ? 0.12 : 0.05).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 18, yRadius: 18).fill()
+        }
+        if isDropTarget {
+            let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 17, yRadius: 17)
+            ring.lineWidth = 3
+            NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
+            ring.fill()
+            NSColor.controlAccentColor.setStroke()
+            ring.stroke()
         }
         CardView.drawingHover = rowAt != nil ? hoverPoint : nil
         CardView.drawingHeight = bounds.height

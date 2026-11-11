@@ -70,7 +70,10 @@ final class PanelController: NSObject {
         menuPanel.onClose = { [weak self] in self?.panelDidClose() }
         menuPanel.onEscape = { [weak self] in self?.hide() }
         PanelLayout.shared.onChange = { [weak self] in self?.layoutChanged() }
+        cardDrag.onMove = { from, to in PanelLayout.shared.move(from, onto: to) }
     }
+
+    private let cardDrag = CardDragController()
 
     private var mainKinds: [PanelCard?] = []
     private var mainNeedsRebuild = false
@@ -125,6 +128,7 @@ final class PanelController: NSObject {
             card.addSubview(b)
         })
         page.view.autoresizingMask = [.minYMargin]
+        cardDrag.attach(cards: page.cards, kinds: kinds)
         mainKinds = kinds
         mainNeedsRebuild = false
         return page
