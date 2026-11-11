@@ -5,6 +5,7 @@ final class CardView: NSView {
     var rowAt: ((NSPoint) -> String?)?
     private(set) var hoverPoint: NSPoint?
     static var drawingHover: NSPoint?
+    static var drawingHeight: CGFloat = 0
     var drawer: (CGFloat) -> Void = { _ in }
     var onClick: (() -> Void)?
     private var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }
@@ -44,6 +45,7 @@ final class CardView: NSView {
             NSBezierPath(roundedRect: bounds, xRadius: 18, yRadius: 18).fill()
         }
         CardView.drawingHover = rowAt != nil ? hoverPoint : nil
+        CardView.drawingHeight = bounds.height
         drawer(bounds.width)
         CardView.drawingHover = nil
     }

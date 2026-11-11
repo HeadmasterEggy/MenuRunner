@@ -87,6 +87,7 @@ struct SettingsView: View {
                 menuPicker("barStyle", L("菜单栏样式", "Menu Bar Style"), "chart.xyaxis.line")
                 menuPicker("speedSource", L("Runner 速度跟随", "Runner Speed Follows"), "speedometer")
             }
+            PanelCardsSection(langTick: m.langTick)
             Section(L("数据", "Data")) {
                 segmented("refreshInterval", L("刷新频率", "Refresh Rate"), "arrow.clockwise")
                 segmented("tempUnit", L("温度单位", "Temperature Unit"), "thermometer.medium")
