@@ -319,7 +319,7 @@
       ctx.fillStyle = "rgba(255,255,255,0.55)";
       ctx.fillText("v1.9.2", h + 12, cy - 4);
       ctx.fillStyle = done ? COLORS.green : "#fff";
-      ctx.fillText(done ? "→ v1.9.3 ✓" : `→ ${Math.round(p * 100)}%`, h + 12, cy + 16);
+      ctx.fillText(done ? "→ v1.10.0 ✓" : `→ ${Math.round(p * 100)}%`, h + 12, cy + 16);
     }
   };
 
