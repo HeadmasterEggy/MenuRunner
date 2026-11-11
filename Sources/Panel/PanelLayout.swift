@@ -4,9 +4,12 @@ final class PanelLayout: ObservableObject {
     static let shared = PanelLayout()
     private static let orderKey = "panelCardOrder"
     private static let hiddenKey = "panelCardHidden"
+    private static let narrowKey = "panelCardNarrow"
+    private static let defaultNarrow = Set(PanelCard.allCases.filter(\.isNarrowByDefault))
 
     @Published private(set) var order: [PanelCard]
     @Published private(set) var hidden: Set<PanelCard>
+    @Published private(set) var narrow: Set<PanelCard>
     var onChange: () -> Void = {}
 
     private init() {
@@ -16,19 +19,28 @@ final class PanelLayout: ObservableObject {
         let unique = saved.filter { seen.insert($0).inserted }
         order = unique + PanelCard.allCases.filter { !seen.contains($0) }
         hidden = Set((d.stringArray(forKey: Self.hiddenKey) ?? []).compactMap(PanelCard.init(rawValue:)))
+        narrow = d.stringArray(forKey: Self.narrowKey).map { Set($0.compactMap(PanelCard.init(rawValue:))) } ?? Self.defaultNarrow
     }
 
     var visible: [PanelCard] { order.filter { !hidden.contains($0) } }
 
-    var isDefault: Bool { order == PanelCard.allCases && hidden.isEmpty }
+    var isDefault: Bool { order == PanelCard.allCases && hidden.isEmpty && narrow == Self.defaultNarrow }
 
-    var rows: [[PanelCard]] { Self.rows(for: visible) }
+    var rows: [[PanelCard]] { rows(for: visible) }
 
-    static func rows(for visible: [PanelCard]) -> [[PanelCard]] {
+    func isNarrow(_ card: PanelCard) -> Bool { narrow.contains(card) }
+
+    func setNarrow(_ card: PanelCard, _ isNarrow: Bool) {
+        guard isNarrow != narrow.contains(card) else { return }
+        if isNarrow { narrow.insert(card) } else { narrow.remove(card) }
+        save()
+    }
+
+    func rows(for visible: [PanelCard]) -> [[PanelCard]] {
         var rows: [[PanelCard]] = []
         var waiting: PanelCard?
         for card in visible {
-            if card.isHalfWidth {
+            if narrow.contains(card) {
                 if let left = waiting { rows.append([left, card]); waiting = nil } else { waiting = card }
                 continue
             }
@@ -64,6 +76,7 @@ final class PanelLayout: ObservableObject {
     func reset() {
         order = PanelCard.allCases
         hidden = []
+        narrow = Self.defaultNarrow
         save()
     }
 
@@ -71,6 +84,7 @@ final class PanelLayout: ObservableObject {
         let d = UserDefaults.standard
         d.set(order.map(\.rawValue), forKey: Self.orderKey)
         d.set(PanelCard.allCases.filter(hidden.contains).map(\.rawValue), forKey: Self.hiddenKey)
+        d.set(PanelCard.allCases.filter(narrow.contains).map(\.rawValue), forKey: Self.narrowKey)
         onChange()
     }
 }

@@ -25,7 +25,7 @@ struct PanelCardsSection: View {
         } header: {
             Text(L("面板卡片", "Panel Cards"))
         } footer: {
-            Text(L("在面板上直接拖动卡片，或在这里拖动调整顺序；关闭开关可隐藏卡片", "Drag cards right in the panel, or drag rows here, to reorder. Turn a card off to hide it."))
+            Text(L("在面板上直接拖动卡片，或在这里拖动调整顺序；右键卡片可切换宽卡片和小卡片，或隐藏卡片", "Drag cards right in the panel, or drag rows here, to reorder. Right-click a card to switch between wide and small, or to hide it."))
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -42,6 +42,16 @@ struct PanelCardsSection: View {
             Text(card.title)
                 .foregroundStyle(shown ? .primary : .secondary)
             Spacer()
+            Picker("", selection: Binding(get: { layout.isNarrow(card) },
+                                          set: { narrow in withAnimation(.snappy) { layout.setNarrow(card, narrow) } })) {
+                Image(systemName: "rectangle").help(L("宽卡片", "Wide card")).tag(false)
+                Image(systemName: "square").help(L("小卡片", "Small card")).tag(true)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(!shown)
             Toggle("", isOn: Binding(get: { layout.isShown(card) },
                                      set: { on in withAnimation(.snappy) { layout.setShown(card, on) } }))
                 .labelsHidden()

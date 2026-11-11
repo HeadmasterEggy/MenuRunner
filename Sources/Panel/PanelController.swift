@@ -88,27 +88,46 @@ final class PanelController: NSObject {
     private var mainKinds: [PanelCard?] = []
     private var mainNeedsRebuild = false
 
-    private func height(_ card: PanelCard) -> CGFloat {
+    private lazy var compact = CompactCards(model: model)
+
+    private func height(_ card: PanelCard, narrow: Bool) -> CGFloat {
         switch card {
-        case .cpu: return 134
+        case .cpu: return narrow ? CompactCards.cpuHeight : 134
         case .gpu, .temps: return gpuTempsHeight
-        case .memory: return 84
+        case .memory: return narrow ? CompactCards.memoryHeight : 84
         case .storage, .battery: return 138
-        case .network: return 96
-        case .power: return PowerCards.mainHeight
+        case .network: return narrow ? CompactCards.networkHeight : 96
+        case .power: return narrow ? CompactCards.powerHeight : PowerCards.mainHeight
         }
+    }
+
+    private func rowHeight(_ row: [PanelCard]) -> CGFloat {
+        row.map { height($0, narrow: row.count == 2) }.max() ?? 0
     }
 
     private func drawer(_ card: PanelCard) -> (CGFloat) -> Void {
         switch card {
-        case .cpu: return { [weak self] w in self?.drawCPU(w) }
+        case .cpu: return { [weak self] w in
+            guard let self else { return }
+            if CompactCards.fits(w) { self.compact.cpu(w, height: CardView.drawingHeight) } else { self.drawCPU(w) }
+        }
         case .gpu: return { [weak self] w in self?.drawGPU(w) }
         case .temps: return { [weak self] w in self?.drawTemps(w) }
-        case .memory: return { [weak self] w in self?.drawMemory(w) }
+        case .memory: return { [weak self] w in
+            guard let self else { return }
+            if CompactCards.fits(w) { self.compact.memory(w, pressure: self.memoryPressure) } else { self.drawMemory(w) }
+        }
         case .storage: return { [weak self] w in self?.drawStorage(w) }
         case .battery: return { [weak self] w in self?.drawBattery(w) }
-        case .network: return { [weak self] w in self?.drawNetwork(w) }
-        case .power: return { [weak self] w in self?.power.drawMain(w) }
+        case .network: return { [weak self] w in
+            guard let self else { return }
+            if CompactCards.fits(w) { self.compact.network(w, height: CardView.drawingHeight) } else { self.drawNetwork(w) }
+        }
+        case .power: return { [weak self] w in
+            guard let self else { return }
+            let recorder = PowerRecorder.shared
+            if CompactCards.fits(w) { self.compact.power(w, apps: Array(recorder.liveApps.prefix(3)), watts: recorder.liveWatts) } else { self.power.drawMain(w) }
+        }
         }
     }
 
@@ -124,7 +143,7 @@ final class PanelController: NSObject {
                 let kind = card.detailKind
                 return (CGFloat(i) * (half + g), width, drawer(card), { [weak self] in self?.showDetail(kind) })
             }
-            rows.append((row.map(height).max() ?? 0, items))
+            rows.append((rowHeight(row), items))
             kinds += row.map { Optional($0) }
         }
         let continuous = Set(kinds.indices.filter { kinds[$0]?.animatesContinuously == true })
@@ -149,8 +168,8 @@ final class PanelController: NSObject {
         let pageHeight = mainPage.size.height
         var frames: [PanelCard: NSRect] = [:]
         var top = Self.headerHeight + g
-        for row in PanelLayout.rows(for: visible) {
-            let h = row.map(height).max() ?? 0
+        for row in PanelLayout.shared.rows(for: visible) {
+            let h = rowHeight(row)
             for (i, card) in row.enumerated() {
                 frames[card] = NSRect(x: M + CGFloat(i) * (half + g), y: pageHeight - M - top - h,
                                       width: row.count == 2 ? half : W, height: h)
@@ -161,6 +180,12 @@ final class PanelController: NSObject {
     }
 
     private func layoutChanged() {
+        guard current === mainPage.view else { mainNeedsRebuild = true; return }
+        let visible = PanelLayout.shared.visible
+        cardDrag.animate(to: mainFrames(visible)) { [weak self] in self?.rebuildMain() }
+    }
+
+    private func rebuildMain() {
         guard current === mainPage.view else { mainNeedsRebuild = true; return }
         let old = mainPage.view
         mainPage = makeMainPage()

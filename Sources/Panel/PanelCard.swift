@@ -5,7 +5,7 @@ enum PanelCard: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var isHalfWidth: Bool {
+    var isNarrowByDefault: Bool {
         switch self {
         case .gpu, .temps, .storage, .battery: return true
         case .cpu, .memory, .network, .power: return false

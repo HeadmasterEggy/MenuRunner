@@ -10,6 +10,7 @@ final class CardView: NSView {
     var onClick: (() -> Void)?
     var onDrag: ((CardView, CardDragController.Phase, NSPoint) -> Void)?
     var cornerRadius: CGFloat = 18
+    var contextMenu: (() -> NSMenu?)?
     private static let dragThreshold: CGFloat = 4
     private var downPoint: NSPoint?
     private var dragging = false
@@ -54,6 +55,7 @@ final class CardView: NSView {
         dragging = false
         onDrag(self, .ended, point)
     }
+    override func menu(for event: NSEvent) -> NSMenu? { contextMenu?() }
     override func mouseUp(with event: NSEvent) {
         downPoint = nil
         guard !dragging else { return }

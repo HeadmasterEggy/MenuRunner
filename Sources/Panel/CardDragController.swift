@@ -42,7 +42,25 @@ final class CardDragController {
         order = slots.map(\.kind)
         for slot in slots {
             slot.card.onDrag = { [weak self] card, phase, point in self?.handle(card, phase, point) }
+            let kind = slot.kind
+            slot.card.contextMenu = { CardMenu.make(for: kind) }
         }
+    }
+
+    func animate(to frames: [PanelCard: NSRect], completion: @escaping () -> Void) {
+        let settled = slots.allSatisfy { frames[$0.kind] == $0.card.frame }
+        guard !settled, dragged == nil else { completion(); return }
+        animate(Self.shiftDuration, {
+            for slot in self.slots {
+                if let frame = frames[slot.kind] {
+                    slot.card.animator().frame = frame
+                    slot.glass?.animator().frame = frame
+                } else {
+                    slot.card.animator().alphaValue = 0
+                    slot.glass?.animator().alphaValue = 0
+                }
+            }
+        }, completion: completion)
     }
 
     private func handle(_ card: CardView, _ phase: Phase, _ point: NSPoint) {
