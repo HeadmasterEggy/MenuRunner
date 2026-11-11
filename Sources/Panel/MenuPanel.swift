@@ -12,6 +12,10 @@ final class MenuPanel: NSObject {
         override var isFlipped: Bool { true }
     }
 
+    private final class OverlayScroller: NSScroller {
+        override class var isCompatibleWithOverlayScrollers: Bool { true }
+    }
+
     private static let cornerRadius: CGFloat = 22
     private static let gap: CGFloat = 6
     private static let edge: CGFloat = 8
@@ -26,6 +30,7 @@ final class MenuPanel: NSObject {
     private var pageSize: NSSize
     private var anchorTop: CGFloat?
     private var targetFrame: NSRect?
+    private var styleObserver: NSObjectProtocol?
     private var generation = 0
     var onClose: () -> Void = {}
     var onEscape: () -> Void = {} { didSet { window.onEscape = onEscape } }
@@ -56,6 +61,7 @@ final class MenuPanel: NSObject {
         clip.layer?.masksToBounds = true
         clip.layer?.backgroundColor = NSColor.clear.cgColor
         document.addSubview(content)
+        scroll.verticalScroller = OverlayScroller()
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
         scroll.hasVerticalScroller = true
@@ -71,6 +77,10 @@ final class MenuPanel: NSObject {
         glass.autoresizingMask = [.width, .height]
         clip.addSubview(glass)
         window.contentView = clip
+        styleObserver = NotificationCenter.default.addObserver(forName: NSScroller.preferredScrollerStyleDidChangeNotification,
+                                                               object: nil, queue: .main) { [weak self] _ in
+            self?.scroll.scrollerStyle = .overlay
+        }
     }
 
     var isShown: Bool { window.isVisible }
@@ -145,6 +155,7 @@ final class MenuPanel: NSObject {
         let overflows = pageSize.height > visibleHeight + 0.5
         scroll.verticalScrollElasticity = overflows ? .automatic : .none
         scroll.hasVerticalScroller = overflows
+        scroll.scrollerStyle = .overlay
         if !overflows { scrollToTop() }
     }
 
