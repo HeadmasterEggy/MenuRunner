@@ -424,21 +424,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var animInterval: Double = 0
+    private var lastTick: CFTimeInterval = 0
+    private var framePhase: Double = 0
+    private static let maxTickRate: Double = 60
+    private static let maxCatchUp: CFTimeInterval = 0.25
+    private static let idleFps: Double = 4
+    private static let midFps: Double = 16
+    private static let fullFps: Double = 60
+    private static let highLoadCurve: Double = 1.5
+
+    static func animationFps(usage u: Double) -> Double {
+        if u <= 0.5 { return idleFps * pow(midFps / idleFps, u * 2) }
+        return midFps * pow(fullFps / midFps, pow(u * 2 - 1, highLoadCurve))
+    }
 
     private func updateAnimTimer() {
         let active = (visibility.visible || panel.isVisible) && targetFps > 0
         guard active else { animTimer?.invalidate(); animTimer = nil; animInterval = 0; return }
-        let interval = 1 / targetFps
+        let interval = 1 / min(targetFps, Self.maxTickRate)
         if animTimer != nil, abs(interval - animInterval) / animInterval < 0.05 { return }
         animTimer?.invalidate()
         animInterval = interval
-        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            guard let self, !self.frames.isEmpty else { return }
-            self.frameIndex = (self.frameIndex + 1) % self.frames.count
-            self.renderStatus()
-        }
+        lastTick = CACurrentMediaTime()
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.advanceFrame() }
+        t.tolerance = 0
         RunLoop.main.add(t, forMode: .common)
         animTimer = t
+    }
+
+    private func advanceFrame() {
+        guard !frames.isEmpty else { return }
+        let now = CACurrentMediaTime()
+        let elapsed = min(now - lastTick, Self.maxCatchUp)
+        lastTick = now
+        framePhase += elapsed * targetFps
+        let steps = Int(framePhase)
+        guard steps > 0 else { return }
+        framePhase -= Double(steps)
+        frameIndex = (frameIndex + steps) % frames.count
+        renderStatus()
     }
 
     private func drawMini(in r: NSRect) {
@@ -515,7 +539,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func scheduleAnimation() {
         let u = min(max(usage, 0), 1)
-        let fps = u <= 0.5 ? 4 * pow(4, u * 2) : 16 * pow(25.0 / 16, u * 2 - 1)
+        let fps = Self.animationFps(usage: u)
         let raw = u * Double(runner.levels)
         if runner.levels > 1, abs(raw - (Double(runLevel) + 0.5)) > 0.6 {
             runLevel = min(Int(raw), runner.levels - 1)
