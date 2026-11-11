@@ -18,7 +18,14 @@ final class AnalysisModel: ObservableObject {
     static let ranges = [24, 72, 168, 336]
     static let shareLimit = 7
 
-    @Published var provider: AIProvider { didSet { defaults.set(provider.rawValue, forKey: "aiProvider"); loadKey() } }
+    @Published var provider: AIProvider {
+        didSet {
+            guard provider != oldValue else { return }
+            APIKeyStore.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), for: oldValue.rawValue)
+            defaults.set(provider.rawValue, forKey: "aiProvider")
+            loadKey()
+        }
+    }
     @Published var claudeModel: String { didSet { defaults.set(claudeModel, forKey: "aiClaudeModel") } }
     @Published var openAIModel: String { didSet { defaults.set(openAIModel, forKey: "aiOpenAIModel") } }
     @Published var openAIBase: String { didSet { defaults.set(openAIBase, forKey: "aiOpenAIBase") } }
