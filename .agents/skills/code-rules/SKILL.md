@@ -41,7 +41,7 @@ The command must print nothing.
   - `Sources/Debug/` for debug and command line helpers
 - Put a new file in the folder that matches its area, and add a new folder only when a new area appears.
 - Name each file after the main type it holds, for example `RocketCat.swift`.
-- Keep build scripts at the repo root, images in `assets/`, screenshots and docs in `docs/`, agent session logs in `docs/session-logs/`.
+- Keep build scripts at the repo root, images in `assets/`, screenshots and docs in `docs/`, agent skills in `.agents/skills/`, agent session logs in `.agents/session-log/`.
 - `build.sh` compiles `Sources/**/*.swift`, so new Swift files must live under `Sources/`.
 
 ## 4. Branch names
@@ -63,4 +63,4 @@ The command must print nothing.
 3. New files sit in the folder that matches their area.
 4. `./build.sh` still builds.
 5. The branch name follows the format above.
-6. The session log for this change is written in `docs/session-logs/`, following `.agents/skills/session-log/SKILL.md`.
+6. The session log for this change is written in `.agents/session-log/`, following `.agents/skills/session-log/SKILL.md`.
