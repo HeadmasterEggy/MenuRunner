@@ -1,6 +1,6 @@
 ---
 name: session-log
-description: MenuRunner session log rule. Use at the start of every agent session to read recent logs, and before the last commit of any session that changes the repo to write its log in .agents/session-log/.
+description: MenuRunner session log rule. Use before starting work in any agent session to read recent logs, and before the last commit of any session that changes the repo to write its log in .agents/session-log/.
 ---
 
 # MenuRunner session logs
