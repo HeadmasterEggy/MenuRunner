@@ -8,12 +8,12 @@
 
 - 规则：新增 `.agents/skills/session-log/SKILL.md`，说明何时写、写在哪、写什么。
 - 日志目录：新增 `.agents/session-log/`，包含 `README.md`（索引）、`TEMPLATE.md`（模板）、一份 1.10.0 之前工作的补记和本日志。
-- 入口：`CLAUDE.md` 指向新规则；`code-rules` 的目录说明和提交前检查加上 session-log。
+- 入口：`AGENTS.md`（`CLAUDE.md` 是它的软链接）写入规则并在 Skills 表加一行；`code-rules` 的目录说明和提交前检查加上 session-log。
 
 ## 分支与 PR
 
 - 分支：`docs/session-log`
-- PR：[#56](https://github.com/HeadmasterEggy/MenuRunner/pull/56)，draft
+- PR：[#56](https://github.com/HeadmasterEggy/MenuRunner/pull/56)，已合并（在 #57 之后合入）
 
 ## 决策
 

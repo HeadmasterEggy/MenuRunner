@@ -9,7 +9,7 @@ description: MenuRunner code and branch rules. Use before writing, editing, spli
 
 ## 1. No code comments
 
-- Do not write comments in source files: no `//`, `///`, `/* */`, no `#` comments in shell scripts, no `MARK:` lines.
+- Do not write comments in source files: no `//`, `///`, `/* */`, no `#` comments in shell scripts or workflow files, no `<!-- -->` in HTML, no `MARK:` lines. `scripts/guardrails/check-no-comments.sh` checks every tracked file.
 - When editing a file that already has comments, remove the ones in the code you touch.
 - Make code explain itself through names: clear type, function and variable names, small functions, named constants instead of magic numbers.
 - Explanations belong in the PR description, the commit message or the README, never in the code.
@@ -18,13 +18,7 @@ description: MenuRunner code and branch rules. Use before writing, editing, spli
 
 - No source file may exceed 1000 lines. Aim well below that; around 300 to 600 lines is a healthy size.
 - When a change would push a file over the limit, split it first, by responsibility, not by cutting it at an arbitrary line.
-- Check before committing:
-
-```sh
-find . -path ./.git -prune -o -type f \( -name '*.swift' -o -name '*.sh' \) -print0 | xargs -0 wc -l | sort -n | awk '$2 != "total" && $1 > 1000'
-```
-
-The command must print nothing.
+- Check before committing with `scripts/guardrails/check-file-length.sh`. It covers Swift, shell, web and workflow files.
 
 ## 3. Organize files into folders
 
@@ -38,10 +32,12 @@ The command must print nothing.
   - `Sources/Update/` for checking GitHub Releases and installing updates
   - `Sources/Power/` for recording power history and building the report sent to AI
   - `Sources/AI/` for the AI provider client, API key storage and the analysis window
+  - `Sources/Style/` for shared AppKit styling such as the macOS 14 safe glass helpers
   - `Sources/Debug/` for debug and command line helpers
+  - `scripts/guardrails/` for the checks run by the pre-push hook and CI, `scripts/hooks/` for git hooks
 - Put a new file in the folder that matches its area, and add a new folder only when a new area appears.
 - Name each file after the main type it holds, for example `RocketCat.swift`.
-- Keep build scripts at the repo root, images in `assets/`, screenshots and docs in `docs/`, agent skills in `.agents/skills/`, agent session logs in `.agents/session-log/`.
+- Keep build scripts at the repo root, check scripts in `scripts/`, images in `assets/`, screenshots and docs in `docs/`, agent skills in `.agents/skills/`, agent session logs in `.agents/session-log/`.
 - `build.sh` compiles `Sources/**/*.swift`, so new Swift files must live under `Sources/`.
 
 ## 4. Branch names
@@ -53,14 +49,13 @@ The command must print nothing.
   - `refactor/` for restructuring without behavior change, for example `refactor/split-panel-controller`
   - `docs/` for README, screenshots and other docs, for example `docs/update-zh-readme`
   - `chore/` for build scripts, config, skills and tooling, for example `chore/branch-naming-rule`
-- Describe the change, not the person or the date. No issue numbers alone, no `wip`, `test` or `tmp` branches.
+- Describe the change, not the person, the tool or the date. No issue numbers alone, no `wip`, `test` or `tmp` branches, and no AI tool names such as `claude/...` even when a tool picks the name.
+- `scripts/guardrails/check-branch-name.sh` checks the current branch.
 - One branch per change. Start it from the latest `main`.
 
 ## Before every commit
 
-1. No new comments in the diff: `git diff --cached | grep -nE '^\+.*(//|/\*)'` should only show URLs or string contents.
-2. The line-count check above prints nothing.
-3. New files sit in the folder that matches their area.
-4. `./build.sh` still builds.
-5. The branch name follows the format above.
-6. The session log for this change is written in `.agents/session-log/`, following `.agents/skills/session-log/SKILL.md`.
+1. `scripts/guardrails/check-all.sh` passes: file length, no comments, banned APIs, skill format and branch name. Run `git config core.hooksPath scripts/hooks` once per clone so the pre-push hook runs it too.
+2. New files sit in the folder that matches their area.
+3. Swift changes compile against macOS 14 with `swiftc -target arm64-apple-macos14.0` over all of `Sources`, in a temporary worktree. Never use `./build.sh` as a check: it kills and reinstalls the running app.
+4. The session log for this change is written in `.agents/session-log/`, following `.agents/skills/session-log/SKILL.md`.
