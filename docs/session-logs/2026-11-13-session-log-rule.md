@@ -13,7 +13,7 @@
 ## 分支与 PR
 
 - 分支：`docs/session-log`
-- PR：见 `README.md` 索引中本条记录
+- PR：[#56](https://github.com/HeadmasterEggy/MenuRunner/pull/56)，draft
 
 ## 决策
 
