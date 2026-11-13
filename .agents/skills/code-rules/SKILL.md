@@ -37,7 +37,7 @@ description: MenuRunner code and branch rules. Use before writing, editing, spli
   - `scripts/guardrails/` for the checks run by the pre-push hook and CI, `scripts/hooks/` for git hooks
 - Put a new file in the folder that matches its area, and add a new folder only when a new area appears.
 - Name each file after the main type it holds, for example `RocketCat.swift`.
-- Keep build scripts at the repo root, check scripts in `scripts/`, images in `assets/`, screenshots and docs in `docs/`, agent skills in `.agents/skills/`.
+- Keep build scripts at the repo root, check scripts in `scripts/`, images in `assets/`, screenshots and docs in `docs/`, agent skills in `.agents/skills/`, agent session logs in `.agents/session-log/`.
 - `build.sh` compiles `Sources/**/*.swift`, so new Swift files must live under `Sources/`.
 
 ## 4. Branch names
@@ -58,3 +58,4 @@ description: MenuRunner code and branch rules. Use before writing, editing, spli
 1. `scripts/guardrails/check-all.sh` passes: file length, no comments, banned APIs, skill format and branch name. Run `git config core.hooksPath scripts/hooks` once per clone so the pre-push hook runs it too.
 2. New files sit in the folder that matches their area.
 3. Swift changes compile against macOS 14 with `swiftc -target arm64-apple-macos14.0` over all of `Sources`, in a temporary worktree. Never use `./build.sh` as a check: it kills and reinstalls the running app.
+4. The session log for this change is written in `.agents/session-log/`, following `.agents/skills/session-log/SKILL.md`.

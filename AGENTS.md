@@ -8,6 +8,10 @@ A macOS menu bar app in Swift: animated runners plus a system monitor panel. One
 
 Follow `.agents/skills/code-rules/SKILL.md` for every change: no code comments, every file at most 1000 lines, files organized into folders, branches named `<type>/<short-description>`.
 
+## Session logs
+
+Follow `.agents/skills/session-log/SKILL.md`: read the recent logs in `.agents/session-log/` before starting, and every session that changes the repo commits its own log there in the same PR.
+
 ## Skills
 
 | Skill | Use when |
@@ -18,6 +22,7 @@ Follow `.agents/skills/code-rules/SKILL.md` for every change: no code comments, 
 | `lock-fixed-bug` | fixing a bug, so a check goes red on the old code |
 | `defect-class-review` | reviewing a diff against the bug classes MenuRunner has shipped |
 | `feature-wiring-trace` | adding a setting, metric or card, or chasing a stale or default value |
+| `session-log` | starting any session, and before the last commit of a session that changes the repo |
 | `skill-hygiene` | editing skills or this file, and turning lessons into rules |
 
 ## Guardrails
