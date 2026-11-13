@@ -102,7 +102,7 @@ final class PanelController: NSObject {
     }
 
     private func rowHeight(_ row: [PanelCard]) -> CGFloat {
-        row.map { height($0, narrow: row.count == 2) }.max() ?? 0
+        row.map { height($0, narrow: PanelLayout.shared.isNarrow($0)) }.max() ?? 0
     }
 
     private func drawer(_ card: PanelCard) -> (CGFloat) -> Void {
@@ -138,10 +138,9 @@ final class PanelController: NSObject {
         ]
         var kinds: [PanelCard?] = [nil]
         for row in PanelLayout.shared.rows {
-            let width = row.count == 2 ? half : W
             let items = row.enumerated().map { i, card -> (CGFloat, CGFloat, (CGFloat) -> Void, (() -> Void)?) in
                 let kind = card.detailKind
-                return (CGFloat(i) * (half + g), width, drawer(card), { [weak self] in self?.showDetail(kind) })
+                return (CGFloat(i) * (half + g), PanelLayout.shared.isNarrow(card) ? half : W, drawer(card), { [weak self] in self?.showDetail(kind) })
             }
             rows.append((rowHeight(row), items))
             kinds += row.map { Optional($0) }
@@ -172,7 +171,7 @@ final class PanelController: NSObject {
             let h = rowHeight(row)
             for (i, card) in row.enumerated() {
                 frames[card] = NSRect(x: M + CGFloat(i) * (half + g), y: pageHeight - M - top - h,
-                                      width: row.count == 2 ? half : W, height: h)
+                                      width: PanelLayout.shared.isNarrow(card) ? half : W, height: h)
             }
             top += h + g
         }
