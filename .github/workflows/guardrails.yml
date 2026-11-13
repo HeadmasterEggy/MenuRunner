@@ -1,0 +1,28 @@
+name: guardrails
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run guardrails
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: scripts/guardrails/check-all.sh "$BRANCH"
+
+  compile:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile for macOS 14 and later
+        run: |
+          xcrun swiftc --version
+          find Sources -name '*.swift' -print0 | xargs -0 xcrun swiftc -O -target arm64-apple-macos14.0 -o "$RUNNER_TEMP/MenuRunner"

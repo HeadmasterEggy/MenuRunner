@@ -1,0 +1,5 @@
+NSPopover	^$	Use MenuPanel (Sources/Panel/MenuPanel.swift). An NSPopover on the status item keeps the fullscreen menu bar from auto-hiding, even after quit.	PR #47
+Host\.current\(|NSHost([^i]|$)	^$	Read the computer name with SCDynamicStoreCopyComputerName. Host.current() blocks on name resolution on the main thread.	PR #28
+ifa_data	^$	Read byte counters from InterfaceCounters (NET_RT_IFLIST2). if_data counters are 32-bit and wrap every 4 GB.	PR #31
+NSGlassEffectView|\.glassEffect\(|GlassEffectContainer|\.buttonStyle\(\.glass	^Sources/(Style/GlassBackground|AI/GlassStyle)\.swift$	Use GlassBackground (AppKit) or glassCard/glassButton/GlassGroup (SwiftUI) so macOS 14 and 15 still launch.	PR #45
+SecItem	^Sources/AI/APIKeyStore\.swift$	Store secrets through APIKeyStore. The ad-hoc signed app makes the Keychain ask for a password after every rebuild.	PR #44
