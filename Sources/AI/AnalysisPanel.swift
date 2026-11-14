@@ -122,7 +122,7 @@ final class AnalysisPanel: NSObject {
         p.isReleasedWhenClosed = false
         p.collectionBehavior = [.transient, .ignoresCycle, .fullScreenAuxiliary, .moveToActiveSpace]
         p.onEscape = { [weak self] in self?.onClose() }
-        let host = NSHostingView(rootView: AnalysisView(m: model, onClose: { [weak self] in self?.onClose() }))
+        let host = NSHostingView(rootView: AnalysisView(m: model, onClose: { [weak self] in self?.onClose() }).environment(\.locale, Lang.locale))
         host.sizingOptions = []
         p.contentView = GlassBackground.window(frame: p.contentLayoutRect, cornerRadius: Self.cornerRadius, content: host)
         return p

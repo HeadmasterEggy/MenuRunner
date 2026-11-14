@@ -13,4 +13,8 @@ enum Lang {
         }
     }
 }
+extension Lang {
+    static var locale: Locale { Locale(identifier: isZh ? "zh_CN" : "en_US") }
+}
+
 func L(_ zh: String, _ en: String) -> String { Lang.isZh ? zh : en }
