@@ -10,7 +10,7 @@ Joey 说“loop 别停”。中英文截图里，内存详情页同一个进程�
 
 ## 分支与 PR
 
-- `fix/top-process-icons`：见 README 表格
+- `fix/top-process-icons`：[#61](https://github.com/HeadmasterEggy/MenuRunner/pull/61)，draft
 
 ## 决策
 
