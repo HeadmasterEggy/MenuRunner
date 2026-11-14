@@ -25,7 +25,7 @@ final class PowerCards {
                                             fraction: 1, respectFlipped: true, hints: nil)
             let value = PowerMonitor.formatWatts(a.value)
             let valueW = NSAttributedString(string: value, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)]).size().width
-            Draw.text(a.name, NSPoint(x: x + 18, y: 38), size: 10, color: .glassSecondary, maxWidth: colW - 24 - valueW)
+            Draw.text(a.name, NSPoint(x: x + 18, y: 38), size: 10, color: .glassSecondary, maxWidth: colW - 30 - valueW)
             Draw.text(value, NSPoint(x: x + colW - 6, y: 38), size: 10, weight: .medium, right: true, mono: true)
         }
     }
@@ -46,11 +46,11 @@ final class PowerCards {
         Draw.chartBackground(chart)
         let values = recorder.hourlyWatts(hours: Self.chartHours)
         let peak = max(values.compactMap { $0 }.max() ?? 0, 1)
-        let gap: CGFloat = 2, inset: CGFloat = 6
+        let gap: CGFloat = 2, inset: CGFloat = 6, labelRoom: CGFloat = 16
         let bw = (chart.width - inset * 2 - gap * CGFloat(values.count - 1)) / CGFloat(values.count)
         for (i, v) in values.enumerated() {
             guard let v else { continue }
-            let h = max(2, (chart.height - inset * 2) * CGFloat(v / peak))
+            let h = max(2, (chart.height - inset - labelRoom) * CGFloat(v / peak))
             let x = chart.minX + inset + CGFloat(i) * (bw + gap)
             NSColor.systemYellow.withAlphaComponent(0.85).setFill()
             NSBezierPath(roundedRect: NSRect(x: x, y: chart.maxY - inset - h, width: bw, height: h), xRadius: 2, yRadius: 2).fill()

@@ -13,6 +13,7 @@ final class PanelController: NSObject {
 
     static let width: CGFloat = 340, gap: CGFloat = 10, margin: CGFloat = 10
     private static let fanRowHeight: CGFloat = 25
+    private static let fanDetailRow: CGFloat = 46
     private static let titleBadgeWidth: CGFloat = 12
     private static let cardCornerRadius: CGFloat = 18
     private static let headerHeight: CGFloat = 56
@@ -304,7 +305,7 @@ final class PanelController: NSObject {
             case .memory:  rows += [(CGFloat(Self.procRows) * 30 + 46, [(0, W, drawProcessList, nil)]),
                                     (CGFloat(Self.topProcRows) * 30 + 46, [(0, W, drawTopProcs, nil)])]
             case .temps:
-                if showsFans { rows.append((CGFloat(FanMonitor.shared.count) * 38 + 42, [(0, W, drawFans, nil)])) }
+                if showsFans { rows.append((CGFloat(FanMonitor.shared.count) * Self.fanDetailRow + 42, [(0, W, drawFans, nil)])) }
                 rows.append((CGFloat(max(1, min(14, (detail.sensors.count + 1) / 2))) * 22 + 24, [(0, W, drawSensors, nil)]))
             case .storage: rows += [(CGFloat(max(1, detail.volumes.count)) * 46 + 14, [(0, W, drawVolumes, nil)]),
                                     (12 * 30 + 46, [(0, W, drawAppSizes, nil)])]
@@ -767,7 +768,7 @@ final class PanelController: NSObject {
             Draw.text(FanMonitor.label(model.v("fan\(f.index)"), stopped: f.rpm < 1), NSPoint(x: w - 14, y: y), size: 12, weight: .medium, right: true, mono: true)
             Draw.bar(NSRect(x: 14, y: y + 18, width: w - 28, height: 4), f.fraction, .systemCyan)
             Draw.text(FanMonitor.format(f.minRpm, unit: false) + " – " + FanMonitor.format(f.maxRpm), NSPoint(x: 14, y: y + 25), size: 9, color: .glassTertiary, mono: true)
-            y += 38
+            y += Self.fanDetailRow
         }
     }
 
@@ -800,12 +801,8 @@ final class PanelController: NSObject {
             x += bw
         }
         NSGraphicsContext.restoreGraphicsState()
-        var lx: CGFloat = 14
-        for (name, v, c) in [("App", m.memory.app, NSColor.systemBlue), (L("联动", "Wired"), m.memory.wired, .systemOrange), (L("压缩", "Compressed"), m.memory.compressed, .systemPurple)] {
-            c.setFill(); NSBezierPath(ovalIn: NSRect(x: lx, y: 64, width: 7, height: 7)).fill()
-            Draw.text("\(name) \(SystemInfo.gb(v))", NSPoint(x: lx + 11, y: 60), size: 10, color: .glassSecondary, mono: true)
-            lx += (w - 28) / 3
-        }
+        Draw.legend([("App " + SystemInfo.gb(m.memory.app), .systemBlue), (L("联动 ", "Wired ") + SystemInfo.gb(m.memory.wired), .systemOrange),
+                     (L("压缩 ", "Compressed ") + SystemInfo.gb(m.memory.compressed), .systemPurple)], x: 14, y: 60, width: w - 28, size: 10)
     }
 
     private func drawStorage(_ w: CGFloat) {
@@ -880,9 +877,9 @@ final class PanelController: NSObject {
         Draw.text("↑ " + NetMonitor.format(m.v("up")), NSPoint(x: w - 120, y: 13), size: 11, weight: .medium, color: .systemPink, right: true, mono: true)
         let chart = NSRect(x: 14, y: 40, width: w - 28, height: 42)
         Draw.chartBackground(chart)
-        let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024)
-        Draw.area(chart, m.netHistory.map { $0.down / peak }, scroll: m.scroll, color: .systemTeal, dot: true)
-        Draw.area(chart, m.netHistory.map { $0.up / peak }, scroll: m.scroll, color: .systemPink, line: true)
+        let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024), scale = peak / Draw.labelHeadroom
+        Draw.area(chart, m.netHistory.map { $0.down / scale }, scroll: m.scroll, color: .systemTeal, dot: true)
+        Draw.area(chart, m.netHistory.map { $0.up / scale }, scroll: m.scroll, color: .systemPink, line: true)
         Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 12, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
         func bytes(_ b: Double) -> String { b >= 1_073_741_824 ? String(format: "%.2f GB", b / 1_073_741_824) : String(format: "%.0f MB", b / 1_048_576) }
         Draw.text(L("本次 ", "Session ") + "↑ " + bytes(netTotals.up) + "  ↓ " + bytes(netTotals.down),
