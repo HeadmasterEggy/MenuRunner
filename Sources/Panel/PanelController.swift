@@ -591,8 +591,8 @@ final class PanelController: NSObject {
         var y: CGFloat = 36
         for p in procs {
             rowHighlight(y, w, clickable: p.path != nil)
-            ProcessMemory.icon(p.path).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver,
-                                            fraction: 1, respectFlipped: true, hints: nil)
+            ProcessMemory.icon(p.path?.hasSuffix(".app") == true ? p.path : nil).draw(in: NSRect(x: 14, y: y, width: 20, height: 20), from: .zero, operation: .sourceOver,
+                                                                                    fraction: 1, respectFlipped: true, hints: nil)
             let value = ProcessMemory.format(p.bytes)
             var nameW = w - 56 - 70
             if p.user != me {
