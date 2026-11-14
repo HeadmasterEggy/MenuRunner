@@ -16,7 +16,7 @@ Joey 说“loop 别停”，继续找 bug。这一轮在 Joey 的 Mac 上把每�
 
 ## 分支与 PR
 
-- `fix/app-language-labels`：见 README 表格
+- `fix/app-language-labels`：[#59](https://github.com/HeadmasterEggy/MenuRunner/pull/59)，draft
 
 ## 决策
 

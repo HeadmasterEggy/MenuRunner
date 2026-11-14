@@ -6,7 +6,7 @@
 
 | 日期 | 日志 | 分支 | PR |
 | --- | --- | --- | --- |
-| 2026-11-14 | [修正没跟随 App 语言的文字](2026-11-14-app-language-labels.md) | `fix/app-language-labels` | PENDING |
+| 2026-11-14 | [修正没跟随 App 语言的文字](2026-11-14-app-language-labels.md) | `fix/app-language-labels` | [#59](https://github.com/HeadmasterEggy/MenuRunner/pull/59) |
 | 2026-11-11 | [找 bug 并修复](2026-11-11-find-and-fix-bugs.md) | `fix/keep-lone-small-card-half-width` | [#58](https://github.com/HeadmasterEggy/MenuRunner/pull/58) |
 | 2026-11-13 | [新增 session-log 规则](2026-11-13-session-log-rule.md) | `docs/session-log` | [#56](https://github.com/HeadmasterEggy/MenuRunner/pull/56) |
 | 2026-11-13 | [补记：1.10.0 之前的主要工作](2026-11-13-history-to-1-10-0.md) | | #1 到 #55 |
