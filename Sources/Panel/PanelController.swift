@@ -877,9 +877,9 @@ final class PanelController: NSObject {
         Draw.text("↑ " + NetMonitor.format(m.v("up")), NSPoint(x: w - 120, y: 13), size: 11, weight: .medium, color: .systemPink, right: true, mono: true)
         let chart = NSRect(x: 14, y: 40, width: w - 28, height: 42)
         Draw.chartBackground(chart)
-        let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024), top = peak / Draw.labelHeadroom
-        Draw.area(chart, m.netHistory.map { $0.down / top }, scroll: m.scroll, color: .systemTeal, dot: true)
-        Draw.area(chart, m.netHistory.map { $0.up / top }, scroll: m.scroll, color: .systemPink, line: true)
+        let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024), scale = peak / Draw.labelHeadroom
+        Draw.area(chart, m.netHistory.map { $0.down / scale }, scroll: m.scroll, color: .systemTeal, dot: true)
+        Draw.area(chart, m.netHistory.map { $0.up / scale }, scroll: m.scroll, color: .systemPink, line: true)
         Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 12, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
         func bytes(_ b: Double) -> String { b >= 1_073_741_824 ? String(format: "%.2f GB", b / 1_073_741_824) : String(format: "%.0f MB", b / 1_048_576) }
         Draw.text(L("本次 ", "Session ") + "↑ " + bytes(netTotals.up) + "  ↓ " + bytes(netTotals.down),
