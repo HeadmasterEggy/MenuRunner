@@ -77,7 +77,7 @@ enum SystemInfo {
             }
             return (L("充满还需", "Until full"), mins > 0 ? fmt(mins) : L("计算中…", "Calculating…"))
         }
-        if b.state == "ac" { return (L("电源", "Power"), L("已接电源", "On AC power")) }
+        if b.state == "ac" { return (L("电源", "Power"), L("已接电源", "On AC Power")) }
         let left = (L("预计可用", "Time left"))
         if let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
            let list = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef] {

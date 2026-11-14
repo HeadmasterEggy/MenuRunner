@@ -148,7 +148,7 @@ struct AnalysisDetails: View {
         let a = Self.timeFormat.string(from: r.lowerBound)
         guard r.upperBound > r.lowerBound else { return a }
         let sameDay = Calendar.current.isDate(r.lowerBound, inSameDayAs: r.upperBound)
-        return a + "–" + (sameDay ? r.upperBound.formatted(date: .omitted, time: .shortened) : Self.timeFormat.string(from: r.upperBound))
+        return a + "–" + (sameDay ? r.upperBound.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: Lang.locale)) : Self.timeFormat.string(from: r.upperBound))
     }
 
     private func toggle(_ id: String) {

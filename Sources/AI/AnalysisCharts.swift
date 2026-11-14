@@ -165,7 +165,7 @@ struct TrendChart: View {
         .chartYAxis {
             AxisMarks { v in
                 AxisGridLine()
-                AxisValueLabel { if let d = v.as(Double.self) { Text(m.metric == .pressure ? String(format: "%.0f", d) : m.metric.format(d)) } }
+                AxisValueLabel { if let d = v.as(Double.self) { Text(m.metric == .pressure ? String(format: "%.0f", d) : (d == 0 && m.metric == .power ? "0 W" : m.metric.format(d))) } }
             }
         }
         .chartOverlay { proxy in
@@ -194,7 +194,7 @@ struct TrendChart: View {
 
     private func tooltip(_ p: TrendPoint, apps: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(p.time.formatted(.dateTime.month().day().hour().minute())).font(.caption2).foregroundStyle(.secondary)
+            Text(p.time.formatted(.dateTime.month().day().hour().minute().locale(Lang.locale))).font(.caption2).foregroundStyle(.secondary)
             Text(m.metric.title + " " + m.metric.format(p.value)).font(.caption.weight(.semibold).monospacedDigit())
             if apps, let a = p.appValue, let app = m.selectedApp {
                 Text(app + " " + (m.metric == .power ? PowerMonitor.formatWatts(a) : String(format: "%.1f%%", a)))

@@ -37,7 +37,7 @@ final class Updater: ObservableObject {
         switch phase {
         case .idle:
             guard let last = UserDefaults.standard.object(forKey: Self.lastCheckKey) as? Date else { return "" }
-            return L("上次检查：", "Last checked: ") + last.formatted(date: .abbreviated, time: .shortened)
+            return L("上次检查：", "Last checked: ") + last.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, locale: Lang.locale))
         case .checking: return L("正在检查…", "Checking…")
         case .upToDate: return L("已是最新版本", "Up to date")
         case .available(let v): return L("发现新版本 \(v)", "Version \(v) available")

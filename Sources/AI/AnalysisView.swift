@@ -42,7 +42,7 @@ struct AnalysisView: View {
 
     private var dateText: String {
         guard let d = m.resultDate else { return "" }
-        return L("上次分析：", "Last analysis: ") + d.formatted(date: .abbreviated, time: .shortened)
+        return L("上次分析：", "Last analysis: ") + d.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, locale: Lang.locale))
     }
 
     private var stepText: String {

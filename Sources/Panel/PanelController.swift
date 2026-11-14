@@ -234,7 +234,7 @@ final class PanelController: NSObject {
             let root = NSView(frame: NSRect(origin: .zero, size: size))
             header.view.setFrameOrigin(NSPoint(x: 0, y: size.height - header.size.height))
             root.addSubview(header.view)
-            let host = NSHostingView(rootView: SettingsView(m: m, width: W + M * 2 - 8, height: formH))
+            let host = NSHostingView(rootView: SettingsView(m: m, width: W + M * 2 - 8, height: formH).environment(\.locale, Lang.locale))
             host.frame = NSRect(x: 4, y: 0, width: W + M * 2 - 8, height: formH)
             root.addSubview(host)
             let p = Page(view: root, size: size, cards: header.cards)
@@ -465,7 +465,7 @@ final class PanelController: NSObject {
     private func drawGPUStats(_ w: CGFloat) {
         sectionTitle(L("利用率", "Utilization"))
         var y: CGFloat = 36
-        for (k, label) in [("Device Utilization %", L("设备", "Device")), ("Renderer Utilization %", L("渲染器", "Renderer")), ("Tiler Utilization %", "Tiler")] {
+        for (k, label) in [("Device Utilization %", L("设备", "Device")), ("Renderer Utilization %", L("渲染器", "Renderer")), ("Tiler Utilization %", L("分块器", "Tiler"))] {
             let v = Double(detail.gpuStats[k] ?? 0) / 100
             Draw.text(label, NSPoint(x: 14, y: y), size: 11, color: .glassSecondary)
             Draw.text(Draw.pct(v), NSPoint(x: w - 14, y: y), size: 11, weight: .medium, right: true, mono: true)
@@ -706,7 +706,7 @@ final class PanelController: NSObject {
         Draw.area(chart, m.cpuHistory.map { $0.system + $0.user }, scroll: m.scroll, color: .systemBlue, dot: true)
         Draw.area(chart, m.cpuHistory.map { $0.system }, scroll: m.scroll, color: .systemOrange)
         var x: CGFloat = 14
-        for (name, key, c) in [("System", "sys", NSColor.systemOrange), ("User", "user", .systemBlue), ("Idle", "idle", .glassTertiary)] {
+        for (name, key, c) in [(L("系统", "System"), "sys", NSColor.systemOrange), (L("用户", "User"), "user", .systemBlue), (L("空闲", "Idle"), "idle", .glassTertiary)] {
             c.setFill(); NSBezierPath(ovalIn: NSRect(x: x, y: 112, width: 7, height: 7)).fill()
             Draw.text("\(name) \(Draw.pct(m.v(key)))", NSPoint(x: x + 11, y: 108), size: 11, color: .glassSecondary, mono: true)
             x += (w - 28) / 3
