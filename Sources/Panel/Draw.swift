@@ -93,6 +93,20 @@ enum Draw {
         }
     }
 
+    static let labelHeadroom = 0.7
+
+    static func legend(_ items: [(String, NSColor)], x: CGFloat, y: CGFloat, width: CGFloat, size: CGFloat) {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)
+        let widths = items.map { 11 + NSAttributedString(string: $0.0, attributes: [.font: font]).size().width }
+        let gap = items.count > 1 ? max(6, (width - widths.reduce(0, +)) / CGFloat(items.count - 1)) : 0
+        var lx = x
+        for (i, (label, color)) in items.enumerated() {
+            color.setFill(); NSBezierPath(ovalIn: NSRect(x: lx, y: y + 4, width: 7, height: 7)).fill()
+            text(label, NSPoint(x: lx + 11, y: y), size: size, color: .glassSecondary, mono: true, maxWidth: x + width - lx - 11)
+            lx += widths[i] + gap
+        }
+    }
+
     static func chartBackground(_ r: NSRect, grid: Bool = true) {
         NSColor.labelColor.withAlphaComponent(0.09).setFill()
         NSBezierPath(roundedRect: r, xRadius: 8, yRadius: 8).fill()

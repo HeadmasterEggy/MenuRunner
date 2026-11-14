@@ -68,9 +68,9 @@ final class CompactCards {
         let top = Self.chartTop + 4
         let chart = NSRect(x: 14, y: top, width: w - 28, height: height - top - Self.bottomInset)
         Draw.chartBackground(chart)
-        let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024)
-        Draw.area(chart, m.netHistory.map { $0.down / peak }, scroll: m.scroll, color: .systemTeal, dot: true)
-        Draw.area(chart, m.netHistory.map { $0.up / peak }, scroll: m.scroll, color: .systemPink, line: true)
+        let peak = max(m.netHistory.map { max($0.up, $0.down) }.max() ?? 0, 10 * 1024), top = peak / Draw.labelHeadroom
+        Draw.area(chart, m.netHistory.map { $0.down / top }, scroll: m.scroll, color: .systemTeal, dot: true)
+        Draw.area(chart, m.netHistory.map { $0.up / top }, scroll: m.scroll, color: .systemPink, line: true)
         Draw.text(L("峰值 ", "Peak ") + NetMonitor.format(peak), NSPoint(x: chart.maxX - 8, y: chart.minY + 3), size: 9, color: .glassTertiary, right: true, mono: true)
     }
 
